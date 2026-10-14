@@ -1,0 +1,8 @@
+# Claude Code / agent tooling (kept local, not part of the project)
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.claude/
+.mcp.json
+docs/agents/
+.scratch/
