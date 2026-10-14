@@ -1,9 +1,10 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (logo, project switcher, branches, account) and a tabbed centre: Staging, History, Explorer, Graph.
-import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, HistoryIcon, Info, Lock, LogOut, Monitor, Moon, Palette, Plus, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, UserRoundPlus, X } from "lucide-react"
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpDown, ArrowUpFromLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsLeft, ChevronsRight, ChevronsUpDown, CommandIcon, Copy, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, HistoryIcon, Info, Lock, LogOut, Monitor, Moon, Palette, Plus, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, UserRoundPlus, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -78,6 +79,17 @@ function SidePanel() {
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { if (searchOpen) inputRef.current?.focus() }, [searchOpen])
   const info = PROJECTS.find((pr) => pr.name === project)!
+  useEffect(() => {
+    const onCmd = (e: Event) => {
+      const { type, value } = (e as CustomEvent<{ type: string; value?: string }>).detail
+      if (type === "settings") setSettings((value as SettingsSection) ?? "general")
+      if (type === "new-branch") setNewFrom(p.branch)
+      if (type === "switch-branch" && value) switchTo(value)
+      if (type === "open-project" && value) { setProject(value); p.say("Opened " + value) }
+    }
+    window.addEventListener("scribe:command", onCmd)
+    return () => window.removeEventListener("scribe:command", onCmd)
+  })
 
   const toggleFav = (b: string) => setFavorites((s) => {
     const n = new Set(s)
@@ -120,7 +132,6 @@ function SidePanel() {
       <div className="flex items-center gap-2 border-b px-3 py-3">
         <span className="grid size-7 place-items-center rounded-lg bg-zinc-900 text-white"><Feather className="size-4" /></span>
         <span className="text-base font-semibold tracking-tight">Scribe</span>
-        <span className="ml-auto rounded border px-1.5 py-px text-[10px] text-zinc-400">for Lore</span>
       </div>
       <div className="border-b p-3">
         <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">Project</div>
@@ -142,26 +153,25 @@ function SidePanel() {
               <SelectItem value="__manage"><Settings /> Manage projects…</SelectItem>
             </SelectContent>
           </Select>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button aria-label="Project information" className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-900"><Info className="size-4" /></button>
-              </TooltipTrigger>
-              <TooltipContent side="right" align="start" className="w-96 max-w-none p-3">
-                <div className="mb-2 text-sm font-semibold">{info.name}</div>
-                <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-xs">
-                  <dt className="opacity-60">Server</dt><dd>{info.server}</dd>
-                  <dt className="opacity-60">Address</dt><dd className="break-all font-mono text-[11px]">{info.url}</dd>
-                  <dt className="opacity-60">Local folder</dt><dd className="break-all font-mono text-[11px]">{info.path}</dd>
-                  <dt className="opacity-60">Size on disk</dt><dd>{info.size}</dd>
-                  <dt className="opacity-60">Branches</dt><dd>{info.branches}</dd>
-                  <dt className="opacity-60">Members</dt><dd>{info.members}</dd>
-                  <dt className="opacity-60">Last synced</dt><dd>{info.lastSync}</dd>
-                  {dev && <><dt className="opacity-60">View filter</dt><dd className="font-mono text-[11px]">{info.viewFilter}</dd></>}
-                </dl>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button aria-label="Project information" title="Project information" className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-900 data-[state=open]:bg-zinc-200/60 data-[state=open]:text-zinc-900"><Info className="size-4" /></button>
+            </PopoverTrigger>
+            <PopoverContent side="right" align="start" className="w-96 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FolderGit2 className="size-4 text-zinc-500" />{info.name}</div>
+              <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-xs">
+                <dt className="text-zinc-500">Server</dt><dd>{info.server}</dd>
+                <dt className="text-zinc-500">Address</dt><dd className="break-all font-mono text-[11px]">{info.url}</dd>
+                <dt className="text-zinc-500">Local folder</dt><dd className="break-all font-mono text-[11px]">{info.path}</dd>
+                <dt className="text-zinc-500">Size on disk</dt><dd>{info.size}</dd>
+                <dt className="text-zinc-500">Branches</dt><dd>{info.branches}</dd>
+                <dt className="text-zinc-500">Members</dt><dd>{info.members}</dd>
+                <dt className="text-zinc-500">Last synced</dt><dd>{info.lastSync}</dd>
+                {dev && <><dt className="text-zinc-500">View filter</dt><dd className="font-mono text-[11px]">{info.viewFilter}</dd></>}
+              </dl>
+              <div className="mt-3 border-t pt-2"><Button size="sm" variant="outline" onClick={() => setSettings("projects")}>Manage projects…</Button></div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       <div className="flex items-center gap-1 px-3 pb-1 pt-3">
@@ -218,10 +228,11 @@ function SidePanel() {
         {rest.map(row)}
         {!visible.length && <li className="px-2 py-3 text-xs text-zinc-400">{favOnly && !favorites.size ? "No favorites yet. Right-click a branch → Add to favorites." : "No branches match."}</li>}
       </ul>
-      <p className="px-3 pb-2 text-[11px] text-zinc-400">Double-click or right-click → Switch.</p>
-      <div className="flex items-center gap-1 border-t p-2">
+      <div className="flex flex-col gap-0.5 border-t p-2">
         <AccountMenu account={account} onSwitch={switchAccount} onOpenAccounts={() => setSettings("account")} />
-        <Button variant="ghost" size="sm" className="shrink-0 gap-2 text-zinc-600" onClick={() => setSettings("general")}><Settings className="size-4" /> Settings</Button>
+        <button className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-zinc-700 hover:bg-zinc-200/60" onClick={() => setSettings("general")}>
+          <span className="grid size-6 shrink-0 place-items-center"><Settings className="size-4 text-zinc-500" /></span> Settings
+        </button>
       </div>
       <SettingsDialog
         section={settings}
@@ -242,9 +253,9 @@ function AccountMenu({ account, onSwitch, onOpenAccounts }: { account: Account; 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-zinc-200/60" title={`${account.email} on ${account.server}`}>
+        <button className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-zinc-200/60" title={`${account.email} on ${account.server}`}>
           <Avatar initials={account.initials} />
-          <span className="min-w-0 flex-1 truncate text-sm text-zinc-700">{account.email.split("@")[0]}</span>
+          <span className="min-w-0 flex-1 truncate text-sm text-zinc-700">{account.email}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-zinc-400" />
         </button>
       </PopoverTrigger>
@@ -274,18 +285,7 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
   const p = useProto()
   const dev = p.mode === "developer"
   const b = name ?? ""
-  const own = GRAPH_COMMITS.filter((cm) => cm.branch === b)
-  const mainHead = GRAPH_COMMITS.find((cm) => cm.branch === "main")!
-  const head = own[0] ?? mainHead
-  const oldest = own[own.length - 1]
-  const baseCommit = oldest ? GRAPH_COMMITS.find((cm) => cm.id === oldest.parents[0]) : mainHead
-  const isMain = b === "main"
-  const behind = baseCommit && !isMain ? GRAPH_COMMITS.filter((cm) => cm.branch === "main" && cm.at > baseCommit.at).length : 0
-  const mergedInto = own.length ? GRAPH_COMMITS.find((cm) => cm.branch !== b && cm.parents.slice(1).includes(head.id))?.branch : undefined
-  const contributors = [...new Set((own.length ? own : [head]).map((cm) => cm.author))]
-  const createdBy = oldest?.author ?? "You"
-  const createdAt = oldest?.at ?? NOW - 10 * 60_000
-  const isProtected = isMain || b.startsWith("release/")
+  const { own, head, isMain, baseCommit, behind, mergedInto, contributors, createdBy, createdAt, isProtected } = branchFacts(b)
   const locks = b === p.branch ? p.files.concat(PROJECT_TREE).filter((f, i, a) => f.lock && a.findIndex((g) => g.path === f.path) === i).length : own.length ? (own.length * 3) % 5 : 0
   const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => <><dt className="text-zinc-500">{label}</dt><dd className="min-w-0">{children}</dd></>
   return (
@@ -514,31 +514,89 @@ function changedFilesFor(rev: Revision) {
   return PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
 }
 
+// A long-running branch, so History has enough commits to page through.
+const LONG_BRANCH = "art/character-pass-2"
+const PASS_PARTS = ["Hero face", "Hero hands", "Villain cape", "Villain armour", "Blacksmith NPC", "Merchant NPC", "Hair cards", "Eye shader", "Boots", "Belt pouches", "Cloak", "Teeth"]
+const PASS_STEPS = ["retopology", "UV layout", "normal bake", "texture pass", "roughness tweak", "LOD 1", "LOD 2", "rig fixes", "weight painting", "material instance", "export to engine", "review notes"]
+const PASS_AUTHORS = ["Ana", "You", "Marco", "Sam", "Ana", "You", "Lena"]
+const LONG_HISTORY: HistoryEntry[] = Array.from({ length: 137 }, (_, i) => ({
+  id: ((0x1a2b3c4d + i * 2654435761) >>> 0).toString(16).padStart(8, "0"),
+  message: `${PASS_PARTS[i % PASS_PARTS.length]}: ${PASS_STEPS[(i * 5) % PASS_STEPS.length]}`,
+  author: PASS_AUTHORS[(i * 3) % PASS_AUTHORS.length],
+  when: "",
+  files: 1 + ((i * 13) % 17),
+  at: NOW - 3 * HOUR - i * 9 * HOUR,
+}))
+
+type HistorySortKey = "message" | "author" | "when" | "revision"
+const PAGE_SIZES = [25, 50, 100]
+
+/** Page numbers to show: all when few, otherwise first, last and a window around the current page. */
+function pageList(count: number, cur: number): (number | "…")[] {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i)
+  const out: (number | "…")[] = [0]
+  const from = Math.max(1, cur - 1), to = Math.min(count - 2, cur + 1)
+  if (from > 1) out.push("…")
+  for (let i = from; i <= to; i++) out.push(i)
+  if (to < count - 2) out.push("…")
+  out.push(count - 1)
+  return out
+}
+
 function HistoryTab() {
   const p = useProto()
   const dev = p.mode === "developer"
+  const [viewBranch, setViewBranch] = useState(p.branch)
+  useEffect(() => setViewBranch(p.branch), [p.branch])
   const [selected, setSelected] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [author, setAuthor] = useState("any")
   const [date, setDate] = useState<DateValue>({ kind: "preset", preset: "any" })
-  const entries: HistoryEntry[] = [
-    ...p.history.map((r) => ({ ...r, at: r.local || r.when === "just now" ? NOW - 60_000 : FILE_REVS.find((f) => f.id === r.id)?.at ?? NOW })),
-    ...OLDER_HISTORY,
-  ]
+  const [sort, setSort] = useState<Sort<HistorySortKey>>({ key: "when", dir: "desc" })
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(25)
+  const isCurrent = viewBranch === p.branch
+  // Commits made in this session belong to the current branch only.
+  const session: HistoryEntry[] = isCurrent ? p.history.filter((r) => r.local || r.when === "just now").map((r) => ({ ...r, at: NOW - 60_000 })) : []
+  const base: HistoryEntry[] = viewBranch === LONG_BRANCH
+    ? LONG_HISTORY
+    : [...p.history.filter((r) => !(r.local || r.when === "just now")).map((r) => ({ ...r, at: FILE_REVS.find((f) => f.id === r.id)?.at ?? NOW })), ...OLDER_HISTORY]
+  const entries = [...session, ...base]
   const authors = [...new Set(entries.map((e) => e.author))].sort()
   const q = query.trim().toLowerCase()
   const dateActive = !(date.kind === "preset" && date.preset === "any")
   const filtering = !!q || author !== "any" || dateActive
-  const shown = entries.filter((e) =>
-    (!q || e.message.toLowerCase().includes(q) || e.id.startsWith(q)) &&
-    (author === "any" || e.author === author) &&
-    matchesDate(date, e.at))
-  const grid = dev ? "grid-cols-[minmax(8rem,1fr)_4.5rem_7.5rem_4.5rem] gap-x-2" : "grid-cols-[minmax(8rem,1fr)_5rem_6rem] gap-x-2"
+  const sign = sort.dir === "asc" ? 1 : -1
+  const cmp: Record<HistorySortKey, (a: HistoryEntry, b: HistoryEntry) => number> = {
+    message: (a, b) => a.message.localeCompare(b.message),
+    author: (a, b) => a.author.localeCompare(b.author) || b.at - a.at,
+    when: (a, b) => a.at - b.at,
+    revision: (a, b) => a.id.localeCompare(b.id),
+  }
+  const shown = entries
+    .filter((e) => (!q || e.message.toLowerCase().includes(q) || e.id.startsWith(q)) && (author === "any" || e.author === author) && matchesDate(date, e.at))
+    .sort((a, b) => cmp[sort.key](a, b) * sign)
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize))
+  const cur = Math.min(page, pageCount - 1)
+  const pageRows = shown.slice(cur * pageSize, (cur + 1) * pageSize)
+  useEffect(() => setPage(0), [viewBranch, query, author, date, sort, pageSize])
+  const listRef = useRef<HTMLDivElement>(null)
+  const goTo = (n: number) => { setPage(n); listRef.current?.scrollTo({ top: 0 }) }
+  const grid = dev ? "grid-cols-[minmax(8rem,1fr)_5.5rem_8rem_5.5rem] gap-x-2" : "grid-cols-[minmax(8rem,1fr)_5.5rem_7rem] gap-x-2"
   const selectedEntry = shown.find((e) => e.id + e.at === selected)
+  const branchOptions = BRANCHES.includes(p.branch) ? BRANCHES : [...BRANCHES, p.branch]
   return (
     <div className="flex h-full">
     <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
       <div className="flex flex-wrap items-center gap-2">
+        <Select value={viewBranch} onValueChange={setViewBranch}>
+          <SelectTrigger size="sm" className="w-56"><GitBranch className="size-4 text-zinc-500" /><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {branchOptions.map((b) => (
+              <SelectItem key={b} value={b}>{b}{b === p.branch && <span className="text-xs text-zinc-400">(current)</span>}{b === LONG_BRANCH && <span className="text-xs text-zinc-400">· {LONG_HISTORY.length} commits</span>}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search messages or revision ID…" className="h-8 pl-8 pr-8" />
@@ -559,14 +617,17 @@ function HistoryTab() {
         <DateRangeFilter value={date} onChange={setDate} today={new Date(NOW)} />
       </div>
       <div className="text-xs text-zinc-500">
-        {shown.length} of {entries.length} commits on {p.branch}
+        {filtering ? `${shown.length} of ${entries.length}` : entries.length} commits on {viewBranch}{!isCurrent && " (not your current branch)"}
         {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setAuthor("any"); setDate({ kind: "preset", preset: "any" }) }}>Clear filters</button>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
-        <div className={cn("sticky top-0 z-10 grid border-b bg-zinc-50 px-3 py-1.5 text-xs font-medium uppercase text-zinc-500", grid)}>
-          <span>Message</span><span>Author</span><span>When</span>{dev && <span>Revision</span>}
+      <div ref={listRef} className="min-h-0 flex-1 overflow-auto rounded-lg border">
+        <div className={cn("sticky top-0 z-10 grid border-b bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-500", grid)}>
+          <SortHeader label="Message" k="message" sort={sort} onSort={setSort} />
+          <SortHeader label="Author" k="author" sort={sort} onSort={setSort} />
+          <SortHeader label="When" k="when" sort={sort} onSort={setSort} firstDir="desc" />
+          {dev && <SortHeader label="Revision" k="revision" sort={sort} onSort={setSort} />}
         </div>
-        {shown.map((r) => {
+        {pageRows.map((r) => {
           const key = r.id + r.at
           const isSel = selected === key
           return (
@@ -585,8 +646,29 @@ function HistoryTab() {
         })}
         {!shown.length && <p className="px-3 py-4 text-sm text-zinc-400">No commits match these filters.</p>}
       </div>
+      {shown.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+          <span>{cur * pageSize + 1}–{Math.min((cur + 1) * pageSize, shown.length)} of {shown.length}</span>
+          <span className="flex items-center gap-1.5">
+            Rows per page
+            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <SelectTrigger size="sm" className="h-7 w-[4.5rem] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>{PAGE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
+            </Select>
+          </span>
+          <nav aria-label="Pages" className="ml-auto flex items-center gap-1">
+            <Button size="icon" variant="ghost" className="size-7" disabled={cur === 0} onClick={() => goTo(0)} aria-label="First page"><ChevronsLeft className="size-4" /></Button>
+            <Button size="icon" variant="ghost" className="size-7" disabled={cur === 0} onClick={() => goTo(cur - 1)} aria-label="Previous page"><ChevronLeft className="size-4" /></Button>
+            {pageList(pageCount, cur).map((n, i) => n === "…"
+              ? <span key={"gap" + i} className="px-1">…</span>
+              : <Button key={n} size="sm" variant={n === cur ? "default" : "ghost"} className="h-7 min-w-7 px-2 text-xs" onClick={() => goTo(n)} aria-current={n === cur ? "page" : undefined}>{n + 1}</Button>)}
+            <Button size="icon" variant="ghost" className="size-7" disabled={cur >= pageCount - 1} onClick={() => goTo(cur + 1)} aria-label="Next page"><ChevronRight className="size-4" /></Button>
+            <Button size="icon" variant="ghost" className="size-7" disabled={cur >= pageCount - 1} onClick={() => goTo(pageCount - 1)} aria-label="Last page"><ChevronsRight className="size-4" /></Button>
+          </nav>
+        </div>
+      )}
       </div>
-      <CommitDetails entry={selectedEntry} onClose={() => setSelected(null)} />
+      <CommitDetails entry={selectedEntry} branch={viewBranch} onClose={() => setSelected(null)} />
     </div>
   )
 }
@@ -704,6 +786,53 @@ function matchesDate(v: DateValue, at: number) {
 
 const COLS = "grid grid-cols-[5.5rem_9rem_6rem_5rem] items-center gap-2 shrink-0"
 
+type SortDir = "asc" | "desc"
+type Sort<K extends string> = { key: K; dir: SortDir }
+
+/** Clickable column header with an asc/desc arrow. Clicking the active column flips direction. */
+function SortHeader<K extends string>({ label, k, sort, onSort, align = "left", firstDir = "asc" }: { label: string; k: K; sort: Sort<K>; onSort: (s: Sort<K>) => void; align?: "left" | "right"; firstDir?: SortDir }) {
+  const active = sort.key === k
+  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(active ? { key: k, dir: sort.dir === "asc" ? "desc" : "asc" } : { key: k, dir: firstDir })}
+      className={cn("group inline-flex items-center gap-1 uppercase hover:text-zinc-900", align === "right" && "justify-self-end", active && "text-zinc-900")}
+      title={`Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      <Icon className={cn("size-3", !active && "opacity-30 group-hover:opacity-100")} />
+    </button>
+  )
+}
+
+type ExplorerSortKey = "name" | "status" | "modified" | "revision" | "size"
+
+function sizeBytes(s: string) {
+  const m = /([\d.]+)\s*(KB|MB|GB)/.exec(s)
+  if (!m) return 0
+  return parseFloat(m[1]) * { KB: 1e3, MB: 1e6, GB: 1e9 }[m[2] as "KB" | "MB" | "GB"]
+}
+const STATUS_RANK = { modified: 0, added: 1, deleted: 2 } as const
+
+function compareFiles(a: FileEntry, b: FileEntry, key: ExplorerSortKey) {
+  switch (key) {
+    case "name": return fileName(a.path).localeCompare(fileName(b.path))
+    case "status": return (a.change ? STATUS_RANK[a.change] : 9) - (b.change ? STATUS_RANK[b.change] : 9)
+    case "modified": return fileMeta(a).at - fileMeta(b).at
+    case "revision": return (fileMeta(a).rev ?? "").localeCompare(fileMeta(b).rev ?? "")
+    case "size": return sizeBytes(a.size) - sizeBytes(b.size)
+  }
+}
+
+/** Folders stay above files; folders sort by name, files by the chosen column. */
+function sortTree(node: Node, sort: Sort<ExplorerSortKey>): Node {
+  const sign = sort.dir === "asc" ? 1 : -1
+  const folders = node.children.filter((c) => !c.file).sort((a, b) => a.name.localeCompare(b.name) * (sort.key === "name" ? sign : 1))
+  const files = node.children.filter((c) => c.file).sort((a, b) => compareFiles(a.file!, b.file!, sort.key) * sign || a.name.localeCompare(b.name))
+  return { ...node, children: [...folders.map((f) => sortTree(f, sort)), ...files] }
+}
+
 type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean; selected: string | null; onSelect: (path: string) => void }
 
 function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: TreeProps) {
@@ -714,6 +843,8 @@ function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: 
     return (
       <FileMenu file={f}>
         <div onClick={() => onSelect(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
+          {/* Same width as a folder's chevron, so a file's icon lines up with sibling folders' icons. */}
+          <span aria-hidden className="w-3.5 shrink-0" />
           <FileTypeIcon path={f.path} />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
@@ -733,8 +864,8 @@ function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: 
   return (
     <div>
       <button onClick={() => toggle(node.path)} className="flex w-full items-center gap-2 py-1 pr-3 text-left hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
-        <ChevronRight className={cn("size-3.5 text-zinc-400 transition", isOpen && "rotate-90")} />
-        {isOpen ? <FolderOpen className="size-4 text-amber-500" /> : <Folder className="size-4 text-amber-500" />}
+        <ChevronRight className={cn("size-3.5 shrink-0 text-zinc-400 transition", isOpen && "rotate-90")} />
+        {isOpen ? <FolderOpen className="size-4 shrink-0 text-amber-500" /> : <Folder className="size-4 shrink-0 text-amber-500" />}
         <span className="text-sm">{node.name}</span>
       </button>
       {isOpen && node.children.map((c) => <TreeNode key={c.path} node={c} depth={depth + 1} open={open} toggle={toggle} forceOpen={forceOpen} selected={selected} onSelect={onSelect} />)}
@@ -751,6 +882,43 @@ function folderPaths(node: Node, maxDepth = Infinity, depth = 0, acc: string[] =
   return acc
 }
 
+type LockMode = "all" | "me" | "others"
+const LOCK_MODES: [LockMode, string, string][] = [["all", "Show locked", "All locked files"], ["me", "Locked by me", "Locked by me"], ["others", "Locked by others", "Locked by others"]]
+const lockTest: Record<LockMode, (f: FileEntry) => boolean> = {
+  all: (f) => !!f.lock,
+  me: (f) => !!f.lock && f.lock.by === "you",
+  others: (f) => !!f.lock && f.lock.by !== "you",
+}
+
+/** Split button: the left part toggles the filter, the arrow picks whose locks. */
+function LockFilterButton({ on, mode, counts, onToggle, onMode }: { on: boolean; mode: LockMode; counts: Record<LockMode, number>; onToggle: () => void; onMode: (m: LockMode) => void }) {
+  const [open, setOpen] = useState(false)
+  const label = LOCK_MODES.find(([k]) => k === mode)![1]
+  return (
+    <div className={cn("flex h-8 items-stretch overflow-hidden rounded-md border bg-white text-sm shadow-xs", on && "border-red-200 bg-red-50 text-red-700")}>
+      <button aria-pressed={on} onClick={onToggle} className={cn("flex items-center gap-1.5 px-2.5 font-medium", on ? "hover:bg-red-100" : "hover:bg-zinc-100")}>
+        <Lock className="size-4" /> {label}
+        <span className={cn("rounded px-1 text-[10px]", on ? "bg-red-100" : "bg-zinc-100 text-zinc-500")}>{counts[mode]}</span>
+      </button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button aria-label="Choose whose locks to show" className={cn("border-l px-1.5", on ? "border-red-200 hover:bg-red-100" : "hover:bg-zinc-100")}><ChevronDown className="size-4" /></button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-56 p-1">
+          {LOCK_MODES.map(([k, , long]) => (
+            <button key={k} onClick={() => { onMode(k); setOpen(false) }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-zinc-100">
+              <Lock className={cn("size-4", k === "others" ? "text-red-600" : "text-zinc-400")} />
+              <span className="flex-1">{long}</span>
+              <span className="text-xs text-zinc-400">{counts[k]}</span>
+              <Check className={cn("size-4", !(on && mode === k) && "invisible")} />
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
+
 function ExplorerTab() {
   const p = useProto()
   const [query, setQuery] = useState("")
@@ -759,14 +927,16 @@ function ExplorerTab() {
   const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
   const [dateFilter, setDateFilter] = useState<DateValue>({ kind: "preset", preset: "any" })
   const [revFilter, setRevFilter] = useState("any")
-  const [lockedOnly, setLockedOnly] = useState(false)
+  const [lockOn, setLockOn] = useState(false)
+  const [lockMode, setLockMode] = useState<LockMode>("all")
+  const [sort, setSort] = useState<Sort<ExplorerSortKey>>({ key: "name", dir: "asc" })
   const q = query.trim().toLowerCase()
   const dateActive = !(dateFilter.kind === "preset" && dateFilter.preset === "any")
-  const filtering = !!q || dateActive || revFilter !== "any" || lockedOnly
-  const lockedCount = all.filter((f) => f.lock).length
+  const filtering = !!q || dateActive || revFilter !== "any" || lockOn
+  const lockCounts = { all: all.filter(lockTest.all).length, me: all.filter(lockTest.me).length, others: all.filter(lockTest.others).length }
   const matches = all.filter((f) => {
     const meta = fileMeta(f)
-    if (lockedOnly && !f.lock) return false
+    if (lockOn && !lockTest[lockMode](f)) return false
     if (q && !f.path.toLowerCase().includes(q)) return false
     if (!matchesDate(dateFilter, meta.at)) return false
     if (revFilter === "working") return meta.rev === null
@@ -774,8 +944,10 @@ function ExplorerTab() {
     return true
   })
   const revOptions = FILE_REVS.map((r) => ({ id: r.id, message: r.message, when: formatWhen(r.at, false) }))
-  const tree = useMemo(() => (filtering ? buildTree(matches) : fullTree), [filtering, matches, fullTree])
+  const tree = useMemo(() => sortTree(filtering ? buildTree(matches) : fullTree, sort), [filtering, matches, fullTree, sort])
   const toggle = (path: string) => setOpen((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n })
+  const allFolders = folderPaths(fullTree)
+  const allOpen = filtering || allFolders.every((f) => open.has(f))
   const [selected, setSelected] = useState<string | null>(null)
   const selectedFile = all.find((f) => f.path === selected)
   return (
@@ -788,27 +960,26 @@ function ExplorerTab() {
         </div>
         <DateRangeFilter value={dateFilter} onChange={setDateFilter} today={new Date(NOW)} />
         <RevisionFilter value={revFilter} onChange={setRevFilter} revisions={revOptions} />
+        <LockFilterButton on={lockOn} mode={lockMode} counts={lockCounts} onToggle={() => setLockOn(!lockOn)} onMode={(m) => { setLockMode(m); setLockOn(true) }} />
         <Button
-          size="sm" variant="outline" aria-pressed={lockedOnly}
-          className={cn("h-8 gap-1.5", lockedOnly && "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800")}
-          onClick={() => setLockedOnly(!lockedOnly)}
-        ><Lock className="size-4" /> Show locked <span className={cn("rounded px-1 text-[10px]", lockedOnly ? "bg-red-100" : "bg-zinc-100 text-zinc-500")}>{lockedCount}</span></Button>
-        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set(folderPaths(fullTree)))}><ChevronsUpDown className="size-4" /> Expand all</Button>
-        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set())}><ChevronsDownUp className="size-4" /> Collapse all</Button>
+          size="sm" variant="outline" className="h-8 w-32 justify-start gap-1.5" disabled={filtering}
+          title={filtering ? "Folders are expanded while filtering" : undefined}
+          onClick={() => setOpen(allOpen ? new Set() : new Set(allFolders))}
+        >{allOpen ? <><ChevronsDownUp className="size-4" /> Collapse all</> : <><ChevronsUpDown className="size-4" /> Expand all</>}</Button>
       </div>
       <div className="text-xs text-zinc-500">
         {p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Content/**, Source/** … · ` : `Files on ${p.branch} · `}
         {matches.length} file{matches.length === 1 ? "" : "s"}{filtering && " matching"}
-        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any"); setLockedOnly(false) }}>Clear filters</button>}
+        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any"); setLockOn(false) }}>Clear filters</button>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
         <div className="flex items-center gap-2 border-b bg-zinc-50 py-1.5 pl-3 pr-3 text-[11px] font-medium uppercase text-zinc-500">
-          <span className="flex-1">Name</span>
+          <span className="flex-1"><SortHeader label="Name" k="name" sort={sort} onSort={setSort} /></span>
           <span className={COLS}>
-            <span className="text-right">Status</span>
-            <span className="text-right">Modified</span>
-            <span className="text-right">Revision</span>
-            <span className="text-right">Size</span>
+            <SortHeader label="Status" k="status" sort={sort} onSort={setSort} align="right" />
+            <SortHeader label="Modified" k="modified" sort={sort} onSort={setSort} align="right" firstDir="desc" />
+            <SortHeader label="Revision" k="revision" sort={sort} onSort={setSort} align="right" />
+            <SortHeader label="Size" k="size" sort={sort} onSort={setSort} align="right" firstDir="desc" />
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -952,8 +1123,8 @@ function SettingsDialog({ section, onSection, account, onSwitchAccount, project,
   const block = "space-y-2 border-b pb-5 last:border-b-0"
   return (
     <Dialog open={section !== null} onOpenChange={(o) => { if (!o) onSection(null) }}>
-      <DialogContent className="flex h-[34rem] gap-0 overflow-hidden p-0 sm:max-w-3xl">
-        <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r bg-zinc-50/80 p-3">
+      <DialogContent className="flex h-[42.5rem] max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[60rem]">
+        <nav className="flex w-56 shrink-0 flex-col gap-0.5 border-r bg-zinc-50/80 p-3">
           <DialogTitle className="px-2 pb-3 pt-1 text-base">Settings</DialogTitle>
           {SETTINGS_NAV.map(([k, l, Icon]) => (
             <button
@@ -1127,14 +1298,15 @@ function ProjectsSettings({ project, onOpenProject }: { project: string; onOpenP
               </button>
               {isOpen && (
                 <div className="space-y-4 border-t bg-white px-4 py-3 pl-10 text-xs">
+                  <div className="grid grid-cols-4 gap-2">
+                    {([["Size on disk", pr.size], ["Branches", pr.branches], ["Members", pr.members], ["Last synced", pr.lastSync]] as const).map(([l, v]) => (
+                      <div key={l} className="rounded-md border bg-zinc-50 px-2.5 py-1.5"><div className="text-zinc-500">{l}</div><div className="text-sm font-medium">{v}</div></div>
+                    ))}
+                  </div>
                   <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1.5">
                     <dt className="text-zinc-500">Server</dt><dd>{pr.server}</dd>
                     <dt className="text-zinc-500">Address</dt><dd className="break-all font-mono text-[11px]">{pr.url}</dd>
                     <dt className="text-zinc-500">Local folder</dt><dd className="break-all font-mono text-[11px]">{pr.path}</dd>
-                    <dt className="text-zinc-500">Size on disk</dt><dd>{pr.size}</dd>
-                    <dt className="text-zinc-500">Branches</dt><dd>{pr.branches}</dd>
-                    <dt className="text-zinc-500">Members</dt><dd>{pr.members}</dd>
-                    <dt className="text-zinc-500">Last synced</dt><dd>{pr.lastSync}</dd>
                   </dl>
                   <div className="grid grid-cols-[6.5rem_1fr] items-center gap-x-3 gap-y-2">
                     <span className="text-zinc-500">Open on</span>
@@ -1285,12 +1457,59 @@ function ancestors(commits: GraphCommit[], head: string) {
   return seen
 }
 
-function GraphTab() {
+/** Mock facts about a branch, derived from the graph data. Shared by the Graph tooltip and Branch information. */
+function branchFacts(b: string) {
+  const own = GRAPH_COMMITS.filter((cm) => cm.branch === b)
+  const mainHead = GRAPH_COMMITS.find((cm) => cm.branch === "main")!
+  const head = own[0] ?? mainHead
+  const oldest = own[own.length - 1]
+  const isMain = b === "main"
+  const baseCommit = isMain ? undefined : oldest ? GRAPH_COMMITS.find((cm) => cm.id === oldest.parents[0]) : mainHead
+  return {
+    own, head, isMain, baseCommit,
+    behind: baseCommit ? GRAPH_COMMITS.filter((cm) => cm.branch === "main" && cm.at > baseCommit.at).length : 0,
+    mergedInto: own.length ? GRAPH_COMMITS.find((cm) => cm.branch !== b && cm.parents.slice(1).includes(head.id))?.branch : undefined,
+    contributors: [...new Set((own.length ? own : [head]).map((cm) => cm.author))],
+    createdBy: oldest?.author ?? "You",
+    createdAt: oldest?.at ?? NOW - 10 * 60_000,
+    isProtected: isMain || b.startsWith("release/"),
+  }
+}
+
+function BranchTooltip({ branch, current, x, y, maxY }: { branch: string; current: boolean; x: number; y: number; maxY: number }) {
+  const f = branchFacts(branch)
+  const col = branchColor(branch)
+  const H = 190
+  return (
+    <div className="pointer-events-none absolute z-30 w-72 rounded-lg border bg-white p-3 text-xs shadow-lg" style={{ left: x + 14, top: Math.max(4, Math.min(y + 10, maxY - H)) }}>
+      <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+        <span className="size-2.5 shrink-0 rounded-full" style={{ background: col }} />
+        <span className="truncate">{branch}</span>
+        {current && <span className="rounded bg-zinc-900 px-1.5 py-px text-[10px] font-medium text-white">current</span>}
+        {f.isProtected && <span className="rounded border px-1.5 py-px text-[10px] font-medium text-zinc-500">protected</span>}
+      </div>
+      <p className="mb-2 text-zinc-500">{f.isMain ? "The project's default branch." : `Started from ${f.baseCommit?.branch ?? "main"} by ${f.createdBy}, ${formatWhen(f.createdAt, false)}.`}</p>
+      <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1">
+        <dt className="text-zinc-500">Commits</dt><dd>{f.own.length}{!f.isMain && <span className="text-zinc-500"> · {f.behind} behind main</span>}</dd>
+        <dt className="text-zinc-500">Latest</dt><dd className="truncate">{f.head.message}</dd>
+        <dt className="text-zinc-500" />
+        <dd className="-mt-1 text-zinc-500">{f.head.author} · {formatWhen(f.head.at, false)}</dd>
+        <dt className="text-zinc-500">Merged</dt><dd>{f.isMain ? "–" : f.mergedInto ? <span className="text-emerald-700">Yes, into {f.mergedInto}</span> : "Not yet"}</dd>
+        <dt className="text-zinc-500">People</dt><dd className="truncate">{f.contributors.join(", ")}</dd>
+      </dl>
+      <p className="mt-2 border-t pt-1.5 text-[11px] text-zinc-400">Right-click the branch in the side panel for more.</p>
+    </div>
+  )
+}
+
+function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const [scope, setScope] = useState<"all" | "current">("all")
   const [hover, setHover] = useState<{ branch: string; x: number; y: number } | null>(null)
+  const [hoverCommit, setHoverCommit] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
 
   // Heads: the newest commit on each branch. A branch made in this session (no commits yet) points at where main is.
   const base = GRAPH_COMMITS.map((cm) => ({ ...cm }))
@@ -1310,10 +1529,16 @@ function GraphTab() {
 
   const { laneOf, edges, width } = layout(commits)
   const graphW = laneX(width - 1) + 14
+  const height = commits.length * ROW_H
   const labels = new Map<string, string[]>()
   for (const [b, id] of heads) if (scope === "all" || b === branch) labels.set(id, [...(labels.get(id) ?? []), b])
   const selectedEntry = commits.find((cm) => cm.id === selected && !cm.working)
   const branchCount = new Set(commits.map((cm) => cm.branch)).size
+  const pick = (cm: GraphCommit) => { if (cm.working) onOpenStaging(); else setSelected(selected === cm.id ? null : cm.id) }
+  const hoverAt = (b: string, el: Element) => {
+    const r = el.getBoundingClientRect(), c = canvasRef.current!.getBoundingClientRect()
+    setHover({ branch: b, x: r.right - c.left - 10, y: r.top - c.top + r.height / 2 })
+  }
 
   return (
     <div className="flex h-full">
@@ -1325,11 +1550,11 @@ function GraphTab() {
             ))}
           </div>
           <span className="text-xs text-zinc-500">{commits.length - working.length} commits · {branchCount} branch{branchCount === 1 ? "" : "es"}</span>
-          <span className="ml-auto text-xs text-zinc-400">Hover a line or dot to see its branch</span>
+          <span className="ml-auto text-xs text-zinc-400">Hover a line, dot or branch tag for details</span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
-          <div className="relative" style={{ height: commits.length * ROW_H, minWidth: graphW + (dev ? 520 : 450) }}>
-            <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={commits.length * ROW_H} onMouseLeave={() => setHover(null)}>
+          <div ref={canvasRef} className="relative" style={{ height, minWidth: graphW + (dev ? 520 : 450) }}>
+            <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={height} onMouseLeave={() => setHover(null)}>
               {edges.map((e, i) => {
                 const dim = hover && hover.branch !== e.branch
                 const hot = hover?.branch === e.branch
@@ -1340,7 +1565,7 @@ function GraphTab() {
                     {/* Wider invisible stroke so a 2px line is easy to hover. */}
                     <path
                       d={d} fill="none" stroke="transparent" strokeWidth={10} style={{ pointerEvents: "stroke" }}
-                      onMouseMove={(ev) => { const r = (ev.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect(); setHover({ branch: e.branch, x: ev.clientX - r.left, y: ev.clientY - r.top }) }}
+                      onMouseMove={(ev) => { const r = canvasRef.current!.getBoundingClientRect(); setHover({ branch: e.branch, x: ev.clientX - r.left, y: ev.clientY - r.top }) }}
                       onMouseLeave={() => setHover(null)}
                     />
                   </g>
@@ -1349,42 +1574,43 @@ function GraphTab() {
               {commits.map((cm, i) => {
                 const x = laneX(laneOf.get(cm.id)!), y = rowY(i), col = branchColor(cm.branch)
                 const dim = hover && hover.branch !== cm.branch
+                const lit = selected === cm.id || hoverCommit === cm.id
                 const hoverProps = {
-                  style: { pointerEvents: "all" as const, cursor: cm.working ? "default" : "pointer" },
+                  style: { pointerEvents: "all" as const, cursor: "pointer" },
                   opacity: dim ? 0.25 : 1,
                   className: "transition-opacity",
-                  onMouseEnter: () => setHover({ branch: cm.branch, x, y }),
-                  onMouseLeave: () => setHover(null),
-                  onClick: () => { if (!cm.working) setSelected(selected === cm.id ? null : cm.id) },
+                  onMouseEnter: () => { setHover({ branch: cm.branch, x, y }); setHoverCommit(cm.id) },
+                  onMouseLeave: () => { setHover(null); setHoverCommit(null) },
+                  onClick: () => pick(cm),
                 }
-                if (cm.working) return <circle key={cm.id} cx={x} cy={y} r={5} fill="white" stroke={col} strokeWidth={2} strokeDasharray="2 2" {...hoverProps} />
                 const isHead = labels.has(cm.id)
                 const isMerge = cm.parents.length > 1
                 return (
                   <g key={cm.id} {...hoverProps}>
-                    {selected === cm.id && <circle cx={x} cy={y} r={9} fill={col} opacity={0.2} />}
-                    {isMerge
-                      ? <circle cx={x} cy={y} r={4.5} fill="white" stroke={col} strokeWidth={2.5} />
-                      : <circle cx={x} cy={y} r={isHead ? 6 : 4.5} fill={col} stroke="white" strokeWidth={1.5} />}
+                    {lit && <circle cx={x} cy={y} r={10} fill={col} opacity={0.22} />}
+                    {lit && <circle cx={x} cy={y} r={10} fill="none" stroke={col} strokeWidth={1} opacity={0.6} />}
+                    {cm.working
+                      ? <circle cx={x} cy={y} r={5} fill="white" stroke={col} strokeWidth={2} strokeDasharray="2 2" />
+                      : isMerge
+                        ? <circle cx={x} cy={y} r={4.5} fill="white" stroke={col} strokeWidth={2.5} />
+                        : <circle cx={x} cy={y} r={isHead ? 6 : 4.5} fill={col} stroke="white" strokeWidth={1.5} />}
                     <circle cx={x} cy={y} r={9} fill="transparent" />
                   </g>
                 )
               })}
             </svg>
-            {hover && (
-              <div
-                className="pointer-events-none absolute z-20 flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium text-white shadow-md"
-                style={{ left: hover.x + 12, top: hover.y - 12, background: branchColor(hover.branch) }}
-              ><GitBranch className="size-3" />{hover.branch}{hover.branch === branch && <span className="opacity-75">(current)</span>}</div>
-            )}
+            {hover && <BranchTooltip branch={hover.branch} current={hover.branch === branch} x={hover.x} y={hover.y} maxY={height} />}
             {commits.map((cm, i) => {
               const isSel = selected === cm.id
               const refs = labels.get(cm.id) ?? []
               const rowEl = (
                 <button
                   key={cm.id}
-                  onClick={() => cm.working ? null : setSelected(isSel ? null : cm.id)}
-                  className={cn("absolute left-0 right-0 flex items-center gap-3 border-b pr-3 text-left text-sm", isSel ? "bg-sky-50" : "hover:bg-zinc-50", cm.working && "cursor-default")}
+                  onClick={() => pick(cm)}
+                  onMouseEnter={() => setHoverCommit(cm.id)}
+                  onMouseLeave={() => setHoverCommit(null)}
+                  title={cm.working ? "Open in Staging" : undefined}
+                  className={cn("group absolute left-0 right-0 flex items-center gap-3 border-b pr-3 text-left text-sm", isSel ? "bg-sky-50" : "hover:bg-zinc-50")}
                   style={{ top: i * ROW_H, height: ROW_H, paddingLeft: graphW + 4 }}
                 >
                   <span className="flex min-w-48 flex-1 items-center gap-1.5 overflow-hidden">
@@ -1393,13 +1619,15 @@ function GraphTab() {
                       return (
                         <span
                           key={b}
+                          onMouseEnter={(e) => hoverAt(b, e.currentTarget)}
+                          onMouseLeave={() => setHover(null)}
                           className={cn("flex max-w-40 shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[11px] font-medium", current && "text-white")}
                           style={current ? { background: branchColor(b), borderColor: branchColor(b) } : { color: branchColor(b), borderColor: branchColor(b) + "66", background: branchColor(b) + "14" }}
-                          title={current ? "Current branch" : b}
                         ><GitBranch className="size-3 shrink-0" /><span className="truncate">{b}</span></span>
                       )
                     })}
                     <span className={cn("truncate", cm.working && "italic text-zinc-500", cm.parents.length > 1 && "text-zinc-500")}>{cm.message}</span>
+                    {cm.working && <span className="shrink-0 text-xs text-sky-700 opacity-0 group-hover:opacity-100">Open in Staging →</span>}
                     {cm.local && <Badge variant="outline" className="shrink-0 font-normal">not pushed</Badge>}
                   </span>
                   {!cm.working && (
@@ -1424,15 +1652,94 @@ function GraphTab() {
   )
 }
 
+type TabKey = "staging" | "history" | "explorer" | "graph" | "log"
+const TAB_ORDER: TabKey[] = ["staging", "history", "explorer", "graph", "log"]
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+const MOD = isMac ? "⌘" : "Ctrl"
+
+/** Ask the side panel to do something it owns (settings, branches, projects). Prototype shortcut instead of lifting state. */
+function runCommand(type: "settings" | "new-branch" | "switch-branch" | "open-project", value?: string) {
+  window.dispatchEvent(new CustomEvent("scribe:command", { detail: { type, value } }))
+}
+
+function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenChange: (o: boolean) => void; onTab: (t: TabKey) => void }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const run = (fn: () => void) => { onOpenChange(false); fn() }
+  const tabs: [TabKey, string, typeof Settings][] = [["staging", "Staging", FileDiff], ["history", "History", HistoryIcon], ["explorer", "Explorer", FolderTree], ["graph", "Graph", GitGraph], ...(dev ? [["log", "Lore log", ScrollText] as [TabKey, string, typeof Settings]] : [])]
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="Commands" description="Run a command or jump somewhere">
+      <CommandInput placeholder="Type a command or search…" />
+      <CommandList className="max-h-[26rem]">
+        <CommandEmpty>No matching commands.</CommandEmpty>
+        <CommandGroup heading="Actions">
+          <CommandItem onSelect={() => run(p.sync)}><ArrowDownToLine /> Sync<CommandShortcut>{MOD} Shift S</CommandShortcut></CommandItem>
+          <CommandItem onSelect={() => run(() => onTab("staging"))}><GitCommitHorizontal /> Commit…</CommandItem>
+          {dev
+            ? <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Push</CommandItem>
+            : <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Commit &amp; Push</CommandItem>}
+          <CommandItem onSelect={() => run(() => runCommand("new-branch"))}><GitBranchPlus /> New branch…</CommandItem>
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Go to">
+          {tabs.map(([k, l, Icon], i) => (
+            <CommandItem key={k} value={`go to ${l}`} onSelect={() => run(() => onTab(k))}><Icon /> {l}<CommandShortcut>{MOD} {i + 1}</CommandShortcut></CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Switch branch">
+          {BRANCHES.map((b) => (
+            <CommandItem key={b} value={`switch branch ${b}`} disabled={b === p.branch} onSelect={() => run(() => runCommand("switch-branch", b))}>
+              <GitBranch /> {b}{b === p.branch && <span className="ml-auto text-xs text-zinc-400">current</span>}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Projects">
+          {PROJECTS.map((pr) => (
+            <CommandItem key={pr.name} value={`open project ${pr.name}`} onSelect={() => run(() => runCommand("open-project", pr.name))}><FolderGit2 /> Open {pr.name}</CommandItem>
+          ))}
+          <CommandItem onSelect={() => run(() => runCommand("settings", "projects"))}><Settings2 /> Manage projects…</CommandItem>
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Settings">
+          <CommandItem onSelect={() => run(() => runCommand("settings", "general"))}><Settings /> Open Settings<CommandShortcut>{MOD} ,</CommandShortcut></CommandItem>
+          <CommandItem onSelect={() => run(() => runCommand("settings", "account"))}><UserRound /> Accounts…</CommandItem>
+          <CommandItem onSelect={() => run(() => runCommand("settings", "theme"))}><Palette /> Theme…</CommandItem>
+          <CommandItem onSelect={() => run(() => { p.setMode(dev ? "artist" : "developer"); p.say(`Switched to ${dev ? "Artist" : "Developer"} Mode`) })}><Monitor /> Switch to {dev ? "Artist" : "Developer"} Mode</CommandItem>
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  )
+}
+
 export function VariantD() {
   const p = useProto()
   const dev = p.mode === "developer"
   const changed = p.files.filter((f) => f.change).length
+  const [tab, setTab] = useState<TabKey>("staging")
+  const [palette, setPalette] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      if (k === "k") { e.preventDefault(); setPalette((o) => !o) }
+      else if (k === ",") { e.preventDefault(); runCommand("settings", "general") }
+      else if (k === "s" && e.shiftKey) { e.preventDefault(); p.sync() }
+      else if (/^[1-5]$/.test(k)) {
+        const t = TAB_ORDER[Number(k) - 1]
+        if (t === "log" && !dev) return
+        e.preventDefault(); setTab(t)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  })
   return (
     <div className="flex h-full">
       <SidePanel />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Tabs defaultValue="staging" className="flex min-h-0 flex-1 flex-col gap-0">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="flex min-h-0 flex-1 flex-col gap-0">
           <div className="flex items-center gap-2 border-b px-3 py-2">
             <TabsList>
               <TabsTrigger value="staging"><FileDiff /> Staging {changed > 0 && <Badge className="ml-1 h-4 border-transparent bg-red-100 px-1.5 text-[10px] text-red-700">{changed}</Badge>}</TabsTrigger>
@@ -1443,6 +1750,10 @@ export function VariantD() {
             </TabsList>
             <div className="ml-auto flex items-center gap-2">
               {!dev && <AdvancedSheet />}
+              <Button size="sm" variant="outline" className="gap-1.5 text-zinc-600" onClick={() => setPalette(true)} title={`Command palette (${MOD}+K)`}>
+                <CommandIcon className="size-4" /> <span className="hidden xl:inline">Commands</span>
+                <kbd className="rounded border bg-zinc-50 px-1 font-sans text-[10px] font-medium text-zinc-500">{MOD} K</kbd>
+              </Button>
               <Button size="sm" variant="outline" className="gap-1.5" onClick={p.sync}><ArrowDownToLine className="size-4" /> Sync</Button>
               {dev && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => p.commitAndPush("")}><ArrowUpFromLine className="size-4" /> Push{p.unpushed ? ` ↑${p.unpushed}` : ""}</Button>}
             </div>
@@ -1450,11 +1761,12 @@ export function VariantD() {
           <TabsContent value="staging" className="min-h-0 flex-1"><StagingTab /></TabsContent>
           <TabsContent value="history" className="min-h-0 flex-1"><HistoryTab /></TabsContent>
           <TabsContent value="explorer" className="min-h-0 flex-1"><ExplorerTab /></TabsContent>
-          <TabsContent value="graph" className="min-h-0 flex-1"><GraphTab /></TabsContent>
+          <TabsContent value="graph" className="min-h-0 flex-1"><GraphTab onOpenStaging={() => setTab("staging")} /></TabsContent>
           {dev && <TabsContent value="log" className="min-h-0 flex-1"><LoreLog /></TabsContent>}
         </Tabs>
         <OperationBar />
       </div>
+      <CommandPalette open={palette} onOpenChange={setPalette} onTab={setTab} />
     </div>
   )
 }
