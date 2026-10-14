@@ -2,7 +2,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
 export type Mode = "artist" | "developer"
-export type Variant = "A" | "B" | "C" | "D"
 export type Screen = "onboarding" | "main" | "conflict"
 
 export type LockState = { by: "you" } | { by: string } | null
@@ -83,10 +82,8 @@ export const LORE_LOG = [
 
 type Proto = {
   mode: Mode; setMode: (m: Mode) => void
-  variant: Variant; setVariant: (v: Variant) => void
   screen: Screen; setScreen: (s: Screen) => void
   branch: string; setBranch: (b: string) => void
-  branchPanePinned: boolean; setBranchPanePinned: (p: boolean) => void
   files: FileEntry[]; setFiles: (f: FileEntry[]) => void
   history: Revision[]
   unpushed: number
@@ -119,10 +116,8 @@ function writeParam(key: string, value: string) {
 
 export function ProtoProvider({ children }: { children: ReactNode }) {
   const [mode, setModeS] = useState<Mode>(() => readParam("mode", ["artist", "developer"] as const, "artist"))
-  const [variant, setVariantS] = useState<Variant>(() => readParam("variant", ["A", "B", "C", "D"] as const, "D"))
   const [screen, setScreenS] = useState<Screen>(() => readParam("screen", ["onboarding", "main", "conflict"] as const, "main"))
   const [branch, setBranch] = useState("main")
-  const [branchPanePinned, setBranchPanePinned] = useState(false)
   const [files, setFiles] = useState(INITIAL_FILES)
   const [historyList, setHistory] = useState(INITIAL_HISTORY)
   const [unpushed, setUnpushed] = useState(0)
@@ -148,10 +143,8 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
 
   const value: Proto = {
     mode, setMode: (m) => { setModeS(m); writeParam("mode", m) },
-    variant, setVariant: (v) => { setVariantS(v); writeParam("variant", v) },
     screen, setScreen: (s) => { setScreenS(s); writeParam("screen", s) },
     branch, setBranch,
-    branchPanePinned, setBranchPanePinned,
     files, setFiles,
     history: historyList,
     unpushed,

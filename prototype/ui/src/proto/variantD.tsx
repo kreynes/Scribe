@@ -1,10 +1,10 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (project switcher + branches) and a tabbed centre: Staging, History, Explorer.
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitCommitHorizontal, Lock, Search, Settings, Settings2, Star, X } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitBranchPlus, GitCommitHorizontal, Lock, Plus, Search, Settings, Settings2, Star, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -52,6 +52,8 @@ function SidePanel() {
   const [search, setSearch] = useState("")
   const [favOnly, setFavOnly] = useState(false)
   const [favorites, setFavorites] = useState(() => new Set(["release/1.2"]))
+  const [branches, setBranches] = useState(BRANCHES)
+  const [newFrom, setNewFrom] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { if (searchOpen) inputRef.current?.focus() }, [searchOpen])
 
@@ -69,12 +71,12 @@ function SidePanel() {
     p.say("Switched to " + b)
   }
   const q = searchOpen ? search.trim().toLowerCase() : ""
-  const visible = BRANCHES.filter((b) => (!q || b.toLowerCase().includes(q)) && (!favOnly || favorites.has(b)))
+  const visible = branches.filter((b) => (!q || b.toLowerCase().includes(q)) && (!favOnly || favorites.has(b)))
   const favs = visible.filter((b) => favorites.has(b))
   const rest = visible.filter((b) => !favorites.has(b))
 
   const row = (b: string) => (
-    <BranchMenu key={b} name={b} favorite={favorites.has(b)} onToggleFavorite={() => toggleFav(b)}>
+    <BranchMenu key={b} name={b} favorite={favorites.has(b)} onToggleFavorite={() => toggleFav(b)} onCreateFrom={() => setNewFrom(b)}>
       <li
         onDoubleClick={() => switchTo(b)}
         className={cn("flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm", b === p.branch ? "bg-zinc-900 text-white" : "hover:bg-zinc-200/60")}
@@ -114,7 +116,19 @@ function SidePanel() {
           className={cn("size-6", favOnly && "bg-amber-100")}
           onClick={() => setFavOnly(!favOnly)}
         ><Star className={cn("size-3.5", favOnly && "fill-amber-400 text-amber-500")} /></Button>
+        <Button size="icon" variant="ghost" title="New branch" className="size-6" onClick={() => setNewFrom(p.branch)}><Plus className="size-3.5" /></Button>
       </div>
+      <NewBranchDialog
+        base={newFrom}
+        branches={branches}
+        onClose={() => setNewFrom(null)}
+        onCreate={(name, base, switchNow) => {
+          setBranches((bs) => [...bs, name])
+          setNewFrom(null)
+          if (switchNow) { p.setBranch(name); p.say(`Created ${name} from ${base} and switched to it`) }
+          else p.say(`Created ${name} from ${base}`)
+        }}
+      />
       <div className={cn("grid px-2 transition-[grid-template-rows,opacity] duration-200 ease-out", searchOpen ? "grid-rows-[1fr] opacity-100" : "pointer-events-none grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
           <div className="relative py-1">
@@ -610,6 +624,100 @@ function ExplorerTab() {
     </div>
       <FileDetails file={selectedFile} onClose={() => setSelected(null)} />
     </div>
+  )
+}
+
+const PREFIXES = ["feature/", "art/", "bugfix/", "experiment/"]
+
+/** Branch-name rules here are a guess at sensible ones, not Lore's actual validation. */
+function branchNameError(name: string, existing: string[]) {
+  if (!name) return null
+  if (/\s/.test(name)) return "No spaces. Use - or / instead."
+  if (name.startsWith("/") || name.endsWith("/") || name.includes("//") || name.includes("..")) return "That isn't a valid branch name."
+  if (existing.includes(name)) return "A branch with this name already exists."
+  return null
+}
+
+/** Opened by the + in the side panel (base = current branch) or "New branch from here…" on a branch's context menu. */
+function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string | null; branches: string[]; onClose: () => void; onCreate: (name: string, base: string, switchNow: boolean) => void }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const [name, setName] = useState("")
+  const [from, setFrom] = useState(base ?? p.branch)
+  const [switchNow, setSwitchNow] = useState(true)
+  useEffect(() => { if (base) { setName(""); setFrom(base); setSwitchNow(true) } }, [base])
+
+  const trimmed = name.trim()
+  const error = branchNameError(trimmed, branches)
+  const changed = p.files.filter((f) => f.change).length
+  const dirty = changed > 0 || p.unpushed > 0
+  // Changes come along only when branching from where you are; otherwise switching would leave them behind.
+  const blocked = switchNow && dirty && from !== p.branch
+  const canCreate = !!trimmed && !error && !blocked
+  const submit = () => { if (canCreate) onCreate(trimmed, from, switchNow) }
+
+  return (
+    <Dialog open={base !== null} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><GitBranchPlus className="size-5" /> New branch</DialogTitle>
+          <DialogDescription>Make a separate line of work. Nothing changes on {from} until you merge it back.</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit() }}>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-branch-name">Name</Label>
+            <Input
+              id="new-branch-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="feature/my-change"
+              className={cn("font-mono text-sm", error && "border-red-400 focus-visible:ring-red-200")}
+              aria-invalid={!!error}
+            />
+            {error
+              ? <p className="text-xs text-red-600">{error}</p>
+              : (
+                <div className="flex flex-wrap gap-1">
+                  {PREFIXES.map((pre) => (
+                    <button
+                      key={pre} type="button"
+                      onClick={() => setName(pre + name.replace(/^[a-z]+\//, ""))}
+                      className="rounded border bg-zinc-50 px-1.5 py-0.5 font-mono text-[11px] text-zinc-600 hover:bg-zinc-100"
+                    >{pre}</button>
+                  ))}
+                </div>
+              )}
+          </div>
+          <div className="space-y-1.5">
+            <Label>Start from</Label>
+            <Select value={from} onValueChange={setFrom}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b} value={b}>
+                    <GitBranch className="size-3.5" /> {b}{b === p.branch && <span className="text-xs text-zinc-400">(current)</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {dev && <p className="font-mono text-[11px] text-zinc-400">at latest revision of {from} · lore branch create {trimmed || "<name>"} --from {from}</p>}
+          </div>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox checked={switchNow} onCheckedChange={(v) => setSwitchNow(v === true)} className="mt-0.5" />
+            <span>
+              Switch to it now
+              {switchNow && dirty && !blocked && <span className="block text-xs text-zinc-500">Your {changed ? `${changed} changed file${changed === 1 ? "" : "s"}` : "unpushed commits"} come with you.</span>}
+              {blocked && <span className="block text-xs text-amber-700">You have changes on {p.branch}. Commit them first, start from {p.branch}, or untick this to create the branch without switching.</span>}
+            </span>
+          </label>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={!canCreate}>Create branch</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

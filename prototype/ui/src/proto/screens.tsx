@@ -1,6 +1,6 @@
 // PROTOTYPE: Onboarding, the conflict screen, and the floating prototype switcher.
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, FolderOpen, Lock, ServerCog, TimerOff } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Copy, ExternalLink, FolderOpen, Lock, ServerCog, TimerOff } from "lucide-react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 import { Thumb } from "./shared"
-import { useProto, type Mode, type Screen, type Variant } from "./state"
+import { useProto, type Mode, type Screen } from "./state"
 
 const STEPS = ["Welcome", "Choose Mode", "Connect", "Sign in", "Get a project", "Done"]
 
@@ -164,33 +164,16 @@ export function ConflictScreen() {
   )
 }
 
-const VARIANTS: [Variant, string][] = [["A", "Three-pane desktop"], ["B", "Status-first column"], ["C", "File browser + team board"], ["D", "Side panel + tabs"]]
 const SCREENS: [Screen, string][] = [["onboarding", "Onboarding"], ["main", "Main"], ["conflict", "Conflict"]]
 
-/** Prototype-only control bar. Arrow keys cycle variants. */
+/** Prototype-only control bar: Mode and screen. */
 export function PrototypeSwitcher() {
   const p = useProto()
-  const i = VARIANTS.findIndex(([v]) => v === p.variant)
-  const cycle = (d: number) => p.setVariant(VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length][0])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement
-      if (t.closest("input, textarea, [contenteditable]")) return
-      if (e.key === "ArrowLeft") cycle(-1)
-      if (e.key === "ArrowRight") cycle(1)
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  })
   if (import.meta.env.PROD) return null
   const pill = "rounded-full px-3 py-1 text-xs"
   return (
     <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-fuchsia-700 p-1.5 text-white shadow-2xl ring-2 ring-fuchsia-300">
       <span className="pl-2 text-[10px] font-bold uppercase tracking-wider opacity-70">Prototype</span>
-      <button onClick={() => cycle(-1)} className="rounded-full p-1 hover:bg-white/20"><ChevronLeft className="size-4" /></button>
-      <span className="w-48 text-center text-xs font-medium">{p.variant} ({VARIANTS[i][1]})</span>
-      <button onClick={() => cycle(1)} className="rounded-full p-1 hover:bg-white/20"><ChevronRight className="size-4" /></button>
-      <span className="h-5 w-px bg-white/30" />
       {(["artist", "developer"] as Mode[]).map((m) => (
         <button key={m} onClick={() => p.setMode(m)} className={cn(pill, p.mode === m ? "bg-white text-fuchsia-800" : "hover:bg-white/20")}>{m === "artist" ? "Artist" : "Developer"}</button>
       ))}

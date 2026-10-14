@@ -1,16 +1,14 @@
-// PROTOTYPE: building blocks shared by all three layout variants. Throwaway code.
-import { useState, type ReactNode } from "react"
-import { GitBranch, Lock, LockOpen, Pin, PinOff, Star, TriangleAlert, X } from "lucide-react"
+// PROTOTYPE: building blocks used by Variant D. Throwaway code.
+import type { ReactNode } from "react"
+import { GitBranchPlus, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { BRANCHES, LORE_LOG, fileName, lockLabel, useProto, type FileEntry, type Revision } from "./state"
+import { LORE_LOG, fileName, lockLabel, useProto, type FileEntry, type Revision } from "./state"
 
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
@@ -21,17 +19,6 @@ export function Thumb({ file, size = "md" }: { file: FileEntry; size?: "sm" | "m
     <div className={cn("grid shrink-0 place-items-center rounded-md bg-gradient-to-br text-zinc-600", KIND_TINT[file.kind], box)}>
       <Icon className={size === "lg" ? "size-8" : "size-4"} />
     </div>
-  )
-}
-
-export function LockBadge({ file }: { file: FileEntry }) {
-  const label = lockLabel(file.lock)
-  if (!label) return null
-  const mine = file.lock?.by === "you"
-  return (
-    <Badge variant={mine ? "secondary" : "destructive"} className="gap-1 font-normal">
-      <Lock className="size-3" /> {label}
-    </Badge>
   )
 }
 
@@ -99,7 +86,7 @@ export function RevisionMenu({ rev, children }: { rev: Revision; children: React
   )
 }
 
-export function BranchMenu({ name, children, favorite, onToggleFavorite }: { name: string; children: ReactNode; favorite?: boolean; onToggleFavorite?: () => void }) {
+export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreateFrom }: { name: string; children: ReactNode; favorite?: boolean; onToggleFavorite?: () => void; onCreateFrom?: () => void }) {
   const p = useProto()
   return (
     <ContextMenu>
@@ -113,10 +100,10 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite }: { nam
             <Star className={cn(favorite && "fill-amber-400 text-amber-500")} /> {favorite ? "Remove from favorites" : "Add to favorites"}
           </ContextMenuItem>
         )}
+        {onCreateFrom && <ContextMenuItem onClick={onCreateFrom}><GitBranchPlus /> New branch from here…</ContextMenuItem>}
         <ContextMenuItem onClick={() => p.say("Copied " + name)}>Copy name</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => p.say("Merge into current (Advanced)")}><Advanced>Merge into current</Advanced></ContextMenuItem>
-        <ContextMenuItem onClick={() => p.say("Create branch from here (Advanced)")}><Advanced>Create branch from here</Advanced></ContextMenuItem>
         <ContextMenuItem variant="destructive" onClick={() => p.say("Delete (Advanced)")}><Advanced>Delete</Advanced></ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -128,57 +115,6 @@ function switchBranch(p: ReturnType<typeof useProto>, name: string) {
   if (dirty) return p.say("Commit or Commit & Push your changes before switching")
   p.setBranch(name)
   p.say("Switched to " + name)
-}
-
-export function BranchList({ compact = false }: { compact?: boolean }) {
-  const p = useProto()
-  return (
-    <ul className="space-y-0.5">
-      {BRANCHES.map((b) => (
-        <BranchMenu key={b} name={b}>
-          <li
-            onClick={() => switchBranch(p, b)}
-            className={cn("flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-zinc-100", b === p.branch && "bg-zinc-900 text-white hover:bg-zinc-800")}
-          >
-            <GitBranch className="size-3.5 shrink-0" />
-            <span className="truncate">{b}</span>
-            {!compact && b === p.branch && <span className="ml-auto text-[10px] opacity-70">current</span>}
-          </li>
-        </BranchMenu>
-      ))}
-    </ul>
-  )
-}
-
-/** Hidden by default; a thin edge reveals it on hover; the pin keeps it open. */
-export function BranchPane({ side = "left" }: { side?: "left" | "right" }) {
-  const p = useProto()
-  const [hover, setHover] = useState(false)
-  const open = p.branchPanePinned || hover
-  return (
-    <div
-      className={cn("relative z-20 flex h-full shrink-0 transition-[width] duration-150", open ? "w-56" : "w-3")}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <div className={cn("flex h-full w-full flex-col border-zinc-200 bg-white", side === "left" ? "border-r" : "border-l", !p.branchPanePinned && open && "shadow-xl")}>
-        {open ? (
-          <>
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Branches</span>
-              <Button size="icon" variant="ghost" className="size-6" onClick={() => p.setBranchPanePinned(!p.branchPanePinned)} title={p.branchPanePinned ? "Unpin" : "Pin open"}>
-                {p.branchPanePinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
-              </Button>
-            </div>
-            <div className="px-2"><BranchList /></div>
-            <p className="mt-auto p-3 text-[11px] text-zinc-400">Right-click a branch for more.</p>
-          </>
-        ) : (
-          <div className="grid h-full place-items-center"><GitBranch className="size-3 text-zinc-300" /></div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 export function ExpiredBanner() {
@@ -241,77 +177,4 @@ export function Toast() {
   const p = useProto()
   if (!p.toast) return null
   return <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-md bg-zinc-900 px-4 py-2 text-sm text-white shadow-lg">{p.toast}</div>
-}
-
-/** Artist: tick files, write a message, Commit or Commit & Push. Developer: explicit staging, Commit and Push separate. */
-export function CommitBox({ className }: { className?: string }) {
-  const p = useProto()
-  const [msg, setMsg] = useState("")
-  const changed = p.files.filter((f) => f.change)
-  const blocked = p.files.some((f) => f.change && f.lock && f.lock.by !== "you")
-  if (p.mode === "artist") {
-    const ticked = changed.filter((f) => f.ticked).length
-    return (
-      <div className={cn("space-y-2", className)}>
-        <Textarea placeholder="What did you change?" value={msg} onChange={(e) => setMsg(e.target.value)} className="min-h-16 resize-none" />
-        <div className="flex gap-2">
-          <Button variant="outline" className="flex-1" onClick={() => { p.commit(msg); setMsg("") }}>Commit</Button>
-          <Button className="flex-[2]" disabled={blocked} onClick={() => { p.commitAndPush(msg); setMsg("") }}>Commit &amp; Push {ticked ? `(${ticked})` : ""}</Button>
-        </div>
-        {p.unpushed > 0 && <p className="text-xs text-zinc-500">{p.unpushed} local commit{p.unpushed > 1 ? "s" : ""} will be included in your next push.</p>}
-      </div>
-    )
-  }
-  const staged = changed.filter((f) => f.staged).length
-  return (
-    <div className={cn("space-y-2", className)}>
-      <Textarea placeholder="Commit message" value={msg} onChange={(e) => setMsg(e.target.value)} className="min-h-16 resize-none font-mono text-xs" />
-      <div className="flex gap-2">
-        <Button variant="outline" className="flex-1" onClick={() => p.setFiles(p.files.map((f) => (f.change ? { ...f, staged: true } : f)))}>Stage all</Button>
-        <Button className="flex-1" onClick={() => { p.commit(msg); setMsg("") }}>Commit ({staged} staged)</Button>
-        <Button variant="secondary" className="flex-1" onClick={() => { p.commitAndPush(msg); setMsg("") }}>Push{p.unpushed ? ` ↑${p.unpushed}` : ""}</Button>
-      </div>
-      <p className="font-mono text-[11px] text-zinc-500">lore file stage · lore revision commit · lore branch push</p>
-    </div>
-  )
-}
-
-export function ChangeRow({ file, dense = false }: { file: FileEntry; dense?: boolean }) {
-  const p = useProto()
-  const dev = p.mode === "developer"
-  return (
-    <FileMenu file={file}>
-      <div className={cn("flex items-center gap-3 rounded-md px-2 hover:bg-zinc-50", dense ? "py-1" : "py-2")}>
-        <Checkbox
-          checked={dev ? file.staged : file.ticked}
-          onCheckedChange={() => (dev ? p.toggleStage(file.path) : p.toggleTick(file.path))}
-        />
-        {!dev && <Thumb file={file} size="sm" />}
-        <div className="min-w-0 flex-1">
-          <div className={cn("truncate", dev ? "font-mono text-xs" : "text-sm font-medium")}>{dev ? file.path : fileName(file.path)}</div>
-          {!dev && <div className="truncate text-xs text-zinc-500">{file.path.split("/").slice(0, -1).join(" / ")}</div>}
-        </div>
-        {dev && <span className="text-[11px] text-zinc-400 tabular-nums">{file.size}</span>}
-        <ChangeBadge file={file} />
-        <LockBadge file={file} />
-      </div>
-    </FileMenu>
-  )
-}
-
-export function HistoryRow({ rev }: { rev: Revision }) {
-  const p = useProto()
-  const dev = p.mode === "developer"
-  return (
-    <RevisionMenu rev={rev}>
-      <div className="flex items-start gap-3 rounded-md px-2 py-2 hover:bg-zinc-50">
-        <div className={cn("mt-1 size-2 shrink-0 rounded-full", rev.local ? "bg-amber-500" : "bg-zinc-400")} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm">{rev.message} {rev.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</div>
-          <div className="text-xs text-zinc-500">{rev.author} · {rev.when} · {rev.files} file{rev.files > 1 ? "s" : ""}</div>
-        </div>
-        {dev && <code className="text-[11px] text-zinc-400">{rev.id}</code>}
-      </div>
-    </RevisionMenu>
-  )
 }
