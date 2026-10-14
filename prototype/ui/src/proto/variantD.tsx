@@ -1,5 +1,5 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (project switcher + branches) and a tabbed centre: Staging, History, Explorer.
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, Lock, Search, Settings, Settings2, Star, X } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitCommitHorizontal, Lock, Search, Settings, Settings2, Star, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -169,11 +169,20 @@ function fileHistory(f: FileEntry) {
   return FILE_REVS.slice(start).filter((_, i) => i % 2 === 0).concat(FILE_REVS[FILE_REVS.length - 1]).filter((r, i, a) => a.indexOf(r) === i)
 }
 
+/** Right-hand details panel that slides in when something is selected. */
+function DetailsPanel({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div className={cn("shrink-0 overflow-hidden border-l bg-zinc-50/40 transition-[width,opacity] duration-200 ease-out", open ? "w-80 opacity-100" : "w-0 border-l-0 opacity-0")}>
+      {children}
+    </div>
+  )
+}
+
 function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: () => void }) {
   const p = useProto()
   const dev = p.mode === "developer"
   return (
-    <div className={cn("shrink-0 overflow-hidden border-r bg-zinc-50/40 transition-[width,opacity] duration-200 ease-out", file ? "w-80 opacity-100" : "w-0 opacity-0")}>
+    <DetailsPanel open={!!file}>
       {file && (
         <div className="flex h-full w-80 flex-col">
           <div className="flex items-start gap-2 border-b p-3">
@@ -191,8 +200,8 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
               <dt className="text-zinc-500">Status</dt><dd>{file.change ? <ChangeBadge file={file} /> : "unchanged"}</dd>
               <dt className="text-zinc-500">Lock</dt>
               <dd className="flex items-center gap-1.5">{file.lock ? <><LockIcon file={file} /> {file.lock.by === "you" ? "Locked by you" : `Locked by ${file.lock.by}`}</> : "Not locked"}</dd>
-              <dt className="text-zinc-500">Last revision</dt><dd><code>{fileHistory(file)[0].id}</code></dd>
-              <dt className="text-zinc-500">Modified</dt><dd>{formatWhen(fileHistory(file)[0].at, dev)}</dd>
+              <dt className="text-zinc-500">Last revision</dt><dd>{fileMeta(file).rev ? <code>{fileMeta(file).rev}</code> : <span className="text-amber-700">working copy</span>}</dd>
+              <dt className="text-zinc-500">Modified</dt><dd>{formatWhen(fileMeta(file).at, dev)}</dd>
               {dev && <><dt className="text-zinc-500">Content hash</dt><dd><code>blake3 9a1f…c03e</code></dd></>}
             </dl>
             <div className="flex flex-wrap gap-1.5">
@@ -226,7 +235,7 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
           </div>
         </div>
       )}
-    </div>
+    </DetailsPanel>
   )
 }
 
@@ -262,7 +271,6 @@ function StagingTab() {
   )
   return (
     <div className="flex h-full">
-      <FileDetails file={selectedFile} onClose={() => setSelected(null)} />
       <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           {dev ? (
@@ -285,6 +293,7 @@ function StagingTab() {
           </div>
         </div>
       </div>
+      <FileDetails file={selectedFile} onClose={() => setSelected(null)} />
     </div>
   )
 }
@@ -307,7 +316,7 @@ function changedFilesFor(rev: Revision) {
 function HistoryTab() {
   const p = useProto()
   const dev = p.mode === "developer"
-  const [open, setOpen] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [author, setAuthor] = useState("any")
   const [date, setDate] = useState<DateValue>({ kind: "preset", preset: "any" })
@@ -323,9 +332,11 @@ function HistoryTab() {
     (!q || e.message.toLowerCase().includes(q) || e.id.startsWith(q)) &&
     (author === "any" || e.author === author) &&
     matchesDate(date, e.at))
-  const grid = dev ? "grid-cols-[1.5rem_1fr_7rem_9rem_6rem]" : "grid-cols-[1.5rem_1fr_7rem_7rem]"
+  const grid = dev ? "grid-cols-[minmax(8rem,1fr)_4.5rem_7.5rem_4.5rem] gap-x-2" : "grid-cols-[minmax(8rem,1fr)_5rem_6rem] gap-x-2"
+  const selectedEntry = shown.find((e) => e.id + e.at === selected)
   return (
-    <div className="flex h-full flex-col gap-2 p-4">
+    <div className="flex h-full">
+    <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
@@ -352,61 +363,81 @@ function HistoryTab() {
       </div>
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
         <div className={cn("sticky top-0 z-10 grid border-b bg-zinc-50 px-3 py-1.5 text-xs font-medium uppercase text-zinc-500", grid)}>
-          <span /><span>Message</span><span>Author</span><span>When</span>{dev && <span>Revision</span>}
+          <span>Message</span><span>Author</span><span>When</span>{dev && <span>Revision</span>}
         </div>
         {shown.map((r) => {
           const key = r.id + r.at
-          const isOpen = open === key
-          const files = changedFilesFor(r)
+          const isSel = selected === key
           return (
-            <div key={key} className="border-b last:border-b-0">
-              <RevisionMenu rev={r}>
-                <button onClick={() => setOpen(isOpen ? null : key)} className={cn("grid w-full items-center px-3 py-2 text-left text-sm hover:bg-zinc-50", isOpen && "bg-zinc-100", grid)}>
-                  <ChevronRight className={cn("size-3.5 text-zinc-400 transition", isOpen && "rotate-90")} />
-                  <span className="truncate">{r.message} {r.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</span>
-                  <span className="truncate text-zinc-600">{r.author}</span>
-                  <span className="text-zinc-500">{formatWhen(r.at, dev)}</span>
-                  {dev && <code className="text-xs text-zinc-400">{r.id}</code>}
-                </button>
-              </RevisionMenu>
-              {isOpen && (
-                <div className="space-y-3 bg-zinc-50/60 px-10 py-3 text-sm">
-                  <div className="grid grid-cols-[7rem_1fr] gap-y-1 text-xs">
-                    <span className="text-zinc-500">Author</span><span>{r.author}{dev && ` <${r.author.toLowerCase()}@studio.local>`}</span>
-                    <span className="text-zinc-500">Date</span><span>{new Date(r.at).toISOString().slice(0, 16).replace("T", " ")}</span>
-                    <span className="text-zinc-500">Branch</span><span>{p.branch}</span>
-                    {dev && <><span className="text-zinc-500">Revision</span><code>{r.id}c41e09ab77f3d2e1</code><span className="text-zinc-500">Parent</span><code>71cc9b20a8e4…</code><span className="text-zinc-500">Metadata</span><code>change-request: none</code></>}
-                  </div>
-                  <div>
-                    <div className="mb-1 text-xs font-medium uppercase text-zinc-500">Files changed ({r.files})</div>
-                    <div className="rounded-md border bg-white">
-                      {files.map((f) => (
-                        <FileMenu key={f.path} file={f}>
-                          <div className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
-                            <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                              <FileTypeIcon path={f.path} />
-                              <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? f.path : fileName(f.path)}</span>
-                              <LockIcon file={f} />
-                            </span>
-                            <Badge variant="outline" className="font-normal">modified</Badge>
-                          </div>
-                        </FileMenu>
-                      ))}
-                      {r.files > files.length && <div className="px-3 py-1.5 text-xs text-zinc-400">+ {r.files - files.length} more</div>}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => p.say("Restore: choose a file or all files")}>Restore this revision…</Button>
-                    <Button size="sm" variant="ghost" onClick={() => p.say("Comparing with previous revision")}>Compare with previous</Button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <RevisionMenu key={key} rev={r}>
+              <button
+                onClick={() => setSelected(isSel ? null : key)}
+                className={cn("grid w-full items-center border-b px-3 py-2 text-left text-sm last:border-b-0", isSel ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50", grid)}
+              >
+                <span className="truncate">{r.message} {r.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</span>
+                <span className="truncate text-zinc-600">{r.author}</span>
+                <span className="text-zinc-500">{formatWhen(r.at, dev)}</span>
+                {dev && <code className="text-xs text-zinc-400">{r.id}</code>}
+              </button>
+            </RevisionMenu>
           )
         })}
         {!shown.length && <p className="px-3 py-4 text-sm text-zinc-400">No commits match these filters.</p>}
       </div>
+      </div>
+      <CommitDetails entry={selectedEntry} onClose={() => setSelected(null)} />
     </div>
+  )
+}
+
+function CommitDetails({ entry, onClose }: { entry: HistoryEntry | undefined; onClose: () => void }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const files = entry ? changedFilesFor(entry) : []
+  return (
+    <DetailsPanel open={!!entry}>
+      {entry && (
+        <div className="flex h-full w-80 flex-col">
+          <div className="flex items-start gap-2 border-b p-3">
+            <GitCommitHorizontal className="mt-0.5 size-5 shrink-0 text-zinc-500" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{entry.message}</div>
+              <div className="text-xs text-zinc-500">{entry.author} · {formatWhen(entry.at, false)}</div>
+            </div>
+            <button aria-label="Close commit details" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900" onClick={onClose}><X className="size-4" /></button>
+          </div>
+          <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3 text-xs">
+            <dl className="grid grid-cols-[6rem_1fr] gap-y-1.5">
+              <dt className="text-zinc-500">Author</dt><dd>{entry.author}{dev && ` <${entry.author.toLowerCase()}@studio.local>`}</dd>
+              <dt className="text-zinc-500">Date</dt><dd>{new Date(entry.at).toISOString().slice(0, 16).replace("T", " ")}</dd>
+              <dt className="text-zinc-500">Branch</dt><dd>{p.branch}</dd>
+              <dt className="text-zinc-500">Revision</dt><dd><code>{dev ? `${entry.id}c41e09ab77f3d2e1` : entry.id}</code></dd>
+              {dev && <><dt className="text-zinc-500">Parent</dt><dd><code>71cc9b20a8e4…</code></dd><dt className="text-zinc-500">Metadata</dt><dd><code>change-request: none</code></dd></>}
+              {entry.local && <><dt className="text-zinc-500">Status</dt><dd className="text-amber-700">Not pushed yet</dd></>}
+            </dl>
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.say("Restore: choose a file or all files")}>Restore this revision…</Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Comparing with previous revision")}>Compare with previous</Button>
+            </div>
+            <div>
+              <div className="mb-1.5 font-medium uppercase text-zinc-500">Files changed ({entry.files})</div>
+              <div className="rounded-md border bg-white">
+                {files.map((f) => (
+                  <FileMenu key={f.path} file={f}>
+                    <div className="flex items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0">
+                      <FileTypeIcon path={f.path} />
+                      <span className={cn("min-w-0 flex-1 truncate", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</span>
+                      <LockIcon file={f} />
+                    </div>
+                  </FileMenu>
+                ))}
+                {entry.files > files.length && <div className="px-2 py-1.5 text-zinc-400">+ {entry.files - files.length} more</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </DetailsPanel>
   )
 }
 
@@ -472,16 +503,16 @@ function matchesDate(v: DateValue, at: number) {
 
 const COLS = "grid grid-cols-[5.5rem_9rem_6rem_5rem] items-center gap-2 shrink-0"
 
-type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean }
+type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean; selected: string | null; onSelect: (path: string) => void }
 
-function TreeNode({ node, depth, open, toggle, forceOpen }: TreeProps) {
+function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: TreeProps) {
   const dev = useProto().mode === "developer"
   if (node.file) {
     const f = node.file
     const meta = fileMeta(f)
     return (
       <FileMenu file={f}>
-        <div className="flex items-center gap-2 py-1 pr-3 hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
+        <div onClick={() => onSelect(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
           <FileTypeIcon path={f.path} />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
@@ -505,7 +536,7 @@ function TreeNode({ node, depth, open, toggle, forceOpen }: TreeProps) {
         {isOpen ? <FolderOpen className="size-4 text-amber-500" /> : <Folder className="size-4 text-amber-500" />}
         <span className="text-sm">{node.name}</span>
       </button>
-      {isOpen && node.children.map((c) => <TreeNode key={c.path} node={c} depth={depth + 1} open={open} toggle={toggle} forceOpen={forceOpen} />)}
+      {isOpen && node.children.map((c) => <TreeNode key={c.path} node={c} depth={depth + 1} open={open} toggle={toggle} forceOpen={forceOpen} selected={selected} onSelect={onSelect} />)}
     </div>
   )
 }
@@ -541,8 +572,11 @@ function ExplorerTab() {
   const revOptions = FILE_REVS.map((r) => ({ id: r.id, message: r.message, when: formatWhen(r.at, false) }))
   const tree = useMemo(() => (filtering ? buildTree(matches) : fullTree), [filtering, matches, fullTree])
   const toggle = (path: string) => setOpen((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n })
+  const [selected, setSelected] = useState<string | null>(null)
+  const selectedFile = all.find((f) => f.path === selected)
   return (
-    <div className="flex h-full flex-col gap-2 p-4">
+    <div className="flex h-full">
+    <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
@@ -569,10 +603,12 @@ function ExplorerTab() {
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto py-1">
-          {tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} open={open} toggle={toggle} forceOpen={filtering} />)}
+          {tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} open={open} toggle={toggle} forceOpen={filtering} selected={selected} onSelect={(path) => setSelected(selected === path ? null : path)} />)}
           {!tree.children.length && <p className="px-3 py-3 text-sm text-zinc-400">No files match these filters.</p>}
         </div>
       </div>
+    </div>
+      <FileDetails file={selectedFile} onClose={() => setSelected(null)} />
     </div>
   )
 }
