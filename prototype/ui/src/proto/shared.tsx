@@ -1,6 +1,6 @@
 // PROTOTYPE: building blocks shared by all three layout variants. Throwaway code.
 import { useState, type ReactNode } from "react"
-import { GitBranch, Lock, LockOpen, Pin, PinOff, TriangleAlert, X } from "lucide-react"
+import { GitBranch, Lock, LockOpen, Pin, PinOff, Star, TriangleAlert, X } from "lucide-react"
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -99,7 +99,7 @@ export function RevisionMenu({ rev, children }: { rev: Revision; children: React
   )
 }
 
-export function BranchMenu({ name, children }: { name: string; children: ReactNode }) {
+export function BranchMenu({ name, children, favorite, onToggleFavorite }: { name: string; children: ReactNode; favorite?: boolean; onToggleFavorite?: () => void }) {
   const p = useProto()
   return (
     <ContextMenu>
@@ -108,6 +108,11 @@ export function BranchMenu({ name, children }: { name: string; children: ReactNo
         <ContextMenuLabel>{name}</ContextMenuLabel>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={name === p.branch} onClick={() => switchBranch(p, name)}>Switch to this branch</ContextMenuItem>
+        {onToggleFavorite && (
+          <ContextMenuItem onClick={onToggleFavorite}>
+            <Star className={cn(favorite && "fill-amber-400 text-amber-500")} /> {favorite ? "Remove from favorites" : "Add to favorites"}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={() => p.say("Copied " + name)}>Copy name</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => p.say("Merge into current (Advanced)")}><Advanced>Merge into current</Advanced></ContextMenuItem>

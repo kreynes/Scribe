@@ -28,7 +28,10 @@ export type Revision = {
 
 export type Teammate = { name: string; initials: string; editing: string[]; online: boolean }
 
-export const BRANCHES = ["main", "release/1.2", "feature/new-hero", "art/env-pass"]
+export const BRANCHES = [
+  "main", "release/1.2", "release/1.1", "feature/new-hero", "feature/inventory-ui", "feature/dialogue-system",
+  "feature/save-system", "art/env-pass", "art/character-pass-2", "art/ui-icons", "bugfix/crash-on-load", "experiment/new-lighting",
+]
 
 const INITIAL_FILES: FileEntry[] = [
   { path: "Art/Characters/hero.psd", kind: "image", change: "modified", staged: false, ticked: true, lock: { by: "you" }, size: "212 MB" },

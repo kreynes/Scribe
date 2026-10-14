@@ -12,6 +12,22 @@ import { cn } from "@/lib/utils"
 
 export type RevOption = { id: string; message: string; when: string }
 
+/** Sits on top of a filter button's right edge: a clear ✕ when the filter is active, otherwise a chevron.
+ *  pointerdown is stopped so Radix doesn't treat the click as "outside" or as a trigger press. */
+export function ClearOrChevron({ active, label, onClear }: { active: boolean; label: string; onClear: () => void }) {
+  if (!active) return <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 opacity-50" />
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onClear() }}
+    ><X className="size-3.5" /></button>
+  )
+}
+
 /** "any" | "working" | a full or partial revision ID (matched as a prefix). */
 export function RevisionFilter({ value, onChange, revisions }: { value: string; onChange: (v: string) => void; revisions: RevOption[] }) {
   const [open, setOpen] = useState(false)
@@ -23,12 +39,14 @@ export function RevisionFilter({ value, onChange, revisions }: { value: string; 
   const pick = (v: string) => { onChange(v); setOpen(false); setSearch("") }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 w-48 justify-between font-normal">
-          <span className="truncate"><span className="text-zinc-500">Revision:</span> <span className={cn(value !== "any" && value !== "working" && "font-mono text-xs")}>{label}</span></span>
-          <ChevronDown className="size-4 opacity-50" />
-        </Button>
-      </PopoverTrigger>
+      <div className="relative">
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 w-48 justify-start pr-8 font-normal">
+            <span className="truncate"><span className="text-zinc-500">Revision:</span> <span className={cn(value !== "any" && value !== "working" && "font-mono text-xs")}>{label}</span></span>
+          </Button>
+        </PopoverTrigger>
+        <ClearOrChevron active={value !== "any"} label="Clear revision filter" onClear={() => onChange("any")} />
+      </div>
       <PopoverContent className="w-80 p-0" align="start">
         <Command>
           <CommandInput value={search} onValueChange={setSearch} placeholder="Search or type a revision ID…" />
@@ -103,13 +121,7 @@ export function DateRangeFilter({ value, onChange, today }: { value: DateValue; 
             </span>
           </Button>
         </PopoverTrigger>
-        {active ? (
-          <button
-            aria-label="Clear date filter"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900"
-            onClick={() => { onChange({ kind: "preset", preset: "any" }); setFromText(""); setToText("") }}
-          ><X className="size-3.5" /></button>
-        ) : <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 opacity-50" />}
+        <ClearOrChevron active={active} label="Clear date filter" onClear={() => { onChange({ kind: "preset", preset: "any" }); setFromText(""); setToText("") }} />
       </div>
       <PopoverContent className="w-auto p-0" align="start">
         <div className="flex">
