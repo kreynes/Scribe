@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu, Thumb } from "./shared"
 import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Mode, type Revision } from "./state"
 import { FileTypeIcon } from "./fileTypes"
+import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
 const PROJECTS = ["forest-game", "ui-kit", "cinematics"]
 
@@ -266,14 +267,20 @@ function formatWhen(at: number, dev: boolean) {
   return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
-const DATE_FILTERS = {
-  any: { label: "Any time", test: () => true },
-  today: { label: "Today", test: (at: number) => NOW - at < DAY },
-  week: { label: "Last 7 days", test: (at: number) => NOW - at < 7 * DAY },
-  month: { label: "Last 30 days", test: (at: number) => NOW - at < 30 * DAY },
-  older: { label: "Older than 30 days", test: (at: number) => NOW - at >= 30 * DAY },
-} as const
-type DateFilter = keyof typeof DATE_FILTERS
+const PRESET_TESTS: Record<DatePreset, (at: number) => boolean> = {
+  any: () => true,
+  today: (at) => NOW - at < DAY,
+  week: (at) => NOW - at < 7 * DAY,
+  month: (at) => NOW - at < 30 * DAY,
+  older: (at) => NOW - at >= 30 * DAY,
+}
+
+function matchesDate(v: DateValue, at: number) {
+  if (v.kind === "preset") return PRESET_TESTS[v.preset](at)
+  if (v.from && at < v.from.getTime()) return false
+  if (v.to && at >= v.to.getTime() + DAY) return false // "to" is inclusive of that whole day
+  return true
+}
 
 const COLS = "grid grid-cols-[5.5rem_9rem_6rem_5rem] items-center gap-2 shrink-0"
 
@@ -330,17 +337,20 @@ function ExplorerTab() {
   const all = useMemo(() => PROJECT_TREE.map((t) => p.files.find((f) => f.path === t.path) ?? t), [p.files])
   const fullTree = useMemo(() => buildTree(all), [all])
   const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
-  const [dateFilter, setDateFilter] = useState<DateFilter>("any")
+  const [dateFilter, setDateFilter] = useState<DateValue>({ kind: "preset", preset: "any" })
   const [revFilter, setRevFilter] = useState("any")
   const q = query.trim().toLowerCase()
-  const filtering = !!q || dateFilter !== "any" || revFilter !== "any"
+  const dateActive = !(dateFilter.kind === "preset" && dateFilter.preset === "any")
+  const filtering = !!q || dateActive || revFilter !== "any"
   const matches = all.filter((f) => {
     const meta = fileMeta(f)
     if (q && !f.path.toLowerCase().includes(q)) return false
-    if (!DATE_FILTERS[dateFilter].test(meta.at)) return false
-    if (revFilter === "working" ? meta.rev !== null : revFilter !== "any" && meta.rev !== revFilter) return false
+    if (!matchesDate(dateFilter, meta.at)) return false
+    if (revFilter === "working") return meta.rev === null
+    if (revFilter !== "any" && !(meta.rev ?? "").startsWith(revFilter)) return false
     return true
   })
+  const revOptions = FILE_REVS.map((r) => ({ id: r.id, message: r.message, when: formatWhen(r.at, false) }))
   const tree = useMemo(() => (filtering ? buildTree(matches) : fullTree), [filtering, matches, fullTree])
   const toggle = (path: string) => setOpen((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n })
   return (
@@ -350,25 +360,15 @@ function ExplorerTab() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files…" className="h-8 pl-8" />
         </div>
-        <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
-          <SelectTrigger size="sm" className="w-52"><span className="text-zinc-500">Modified:</span><SelectValue /></SelectTrigger>
-          <SelectContent>{(Object.keys(DATE_FILTERS) as DateFilter[]).map((k) => <SelectItem key={k} value={k}>{DATE_FILTERS[k].label}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={revFilter} onValueChange={setRevFilter}>
-          <SelectTrigger size="sm" className="w-44"><span className="text-zinc-500">Revision:</span><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="any">Any</SelectItem>
-            <SelectItem value="working">Working copy (changed)</SelectItem>
-            {FILE_REVS.map((r) => <SelectItem key={r.id} value={r.id}><code>{r.id}</code> <span className="text-zinc-500">{r.message}</span></SelectItem>)}
-          </SelectContent>
-        </Select>
+        <DateRangeFilter value={dateFilter} onChange={setDateFilter} today={new Date(NOW)} />
+        <RevisionFilter value={revFilter} onChange={setRevFilter} revisions={revOptions} />
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set(folderPaths(fullTree)))}><ChevronsUpDown className="size-4" /> Expand all</Button>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set())}><ChevronsDownUp className="size-4" /> Collapse all</Button>
       </div>
       <div className="text-xs text-zinc-500">
         {p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Content/**, Source/** … · ` : `Files on ${p.branch} · `}
         {matches.length} file{matches.length === 1 ? "" : "s"}{filtering && " matching"}
-        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter("any"); setRevFilter("any") }}>Clear filters</button>}
+        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any") }}>Clear filters</button>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
         <div className="flex items-center gap-2 border-b bg-zinc-50 py-1.5 pl-3 pr-3 text-[11px] font-medium uppercase text-zinc-500">
