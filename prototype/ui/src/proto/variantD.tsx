@@ -816,7 +816,7 @@ const GRAPH_COMMITS: GraphCommit[] = [
   c("c55d0e7a", "main", "Initial import", "Marco", NOW - 64 * DAY, [], 2048),
 ]
 
-type Edge = { from: number; to: number; fromLane: number; via: number; toLane: number; color: string }
+type Edge = { from: number; to: number; fromLane: number; via: number; toLane: number; branch: string }
 
 /** Classic lane assignment: walk newest → oldest, each lane "expects" a commit id. A first parent keeps the child's lane
  *  (so a branch stays in its column until it forks off); extra parents (merges) get their own lane straight away. */
@@ -824,21 +824,21 @@ function layout(commits: GraphCommit[]) {
   const lanes: (string | null)[] = []
   const laneOf = new Map<string, number>()
   const row = new Map(commits.map((cm, i) => [cm.id, i]))
-  const pending: { child: number; parent: string; via: number; color: string }[] = []
+  const pending: { child: number; parent: string; via: number; branch: string }[] = []
   commits.forEach((cm, i) => {
     let lane = lanes.indexOf(cm.id)
     if (lane === -1) { lane = lanes.indexOf(null); if (lane === -1) lane = lanes.push(null) - 1 }
     lanes.forEach((v, j) => { if (v === cm.id) lanes[j] = null })
     laneOf.set(cm.id, lane)
     cm.parents.filter((pid) => row.has(pid)).forEach((pid, k) => {
-      const parentColor = branchColor(commits[row.get(pid)!].branch)
-      if (k === 0) { lanes[lane] = pid; pending.push({ child: i, parent: pid, via: lane, color: branchColor(cm.branch) }); return }
+      const parentBranch = commits[row.get(pid)!].branch
+      if (k === 0) { lanes[lane] = pid; pending.push({ child: i, parent: pid, via: lane, branch: cm.branch }); return }
       let via = lanes.indexOf(pid)
       if (via === -1) { via = lanes.indexOf(null); if (via === -1) via = lanes.length; lanes[via] = pid }
-      pending.push({ child: i, parent: pid, via, color: parentColor })
+      pending.push({ child: i, parent: pid, via, branch: parentBranch })
     })
   })
-  const edges: Edge[] = pending.map((e) => ({ from: e.child, to: row.get(e.parent)!, fromLane: laneOf.get(commits[e.child].id)!, via: e.via, toLane: laneOf.get(e.parent)!, color: e.color }))
+  const edges: Edge[] = pending.map((e) => ({ from: e.child, to: row.get(e.parent)!, fromLane: laneOf.get(commits[e.child].id)!, via: e.via, toLane: laneOf.get(e.parent)!, branch: e.branch }))
   return { laneOf, edges, width: Math.max(1, ...laneOf.values()) + 1 }
 }
 
@@ -879,6 +879,7 @@ function GraphTab() {
   const p = useProto()
   const dev = p.mode === "developer"
   const [scope, setScope] = useState<"all" | "current">("all")
+  const [hover, setHover] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
 
   // Heads: the newest commit on each branch. A branch made in this session (no commits yet) points at where main is.
@@ -914,33 +915,58 @@ function GraphTab() {
             ))}
           </div>
           <span className="text-xs text-zinc-500">{commits.length - working.length} commits · {branchCount} branch{branchCount === 1 ? "" : "es"}</span>
-          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-            {[...heads.keys()].filter((b) => scope === "all" || b === branch).map((b) => (
-              <span key={b} className="flex items-center gap-1 text-xs text-zinc-600"><span className="size-2 rounded-full" style={{ background: branchColor(b) }} />{b}</span>
-            ))}
-          </div>
+          <span className="ml-auto text-xs text-zinc-400">Hover a line or dot to see its branch</span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
           <div className="relative" style={{ height: commits.length * ROW_H, minWidth: graphW + (dev ? 520 : 450) }}>
-            <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={commits.length * ROW_H}>
-              {edges.map((e, i) => (
-                <path key={i} d={edgePath(e)} fill="none" stroke={e.color} strokeWidth={2} strokeLinecap="round" strokeDasharray={commits[e.from].working ? "3 3" : undefined} opacity={0.9} />
-              ))}
+            <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={commits.length * ROW_H} onMouseLeave={() => setHover(null)}>
+              {edges.map((e, i) => {
+                const dim = hover && hover.branch !== e.branch
+                const hot = hover?.branch === e.branch
+                const d = edgePath(e)
+                return (
+                  <g key={i}>
+                    <path d={d} fill="none" stroke={branchColor(e.branch)} strokeWidth={hot ? 3 : 2} strokeLinecap="round" strokeDasharray={commits[e.from].working ? "3 3" : undefined} opacity={dim ? 0.2 : 0.9} className="transition-opacity" />
+                    {/* Wider invisible stroke so a 2px line is easy to hover. */}
+                    <path
+                      d={d} fill="none" stroke="transparent" strokeWidth={10} style={{ pointerEvents: "stroke" }}
+                      onMouseMove={(ev) => { const r = (ev.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect(); setHover({ branch: e.branch, x: ev.clientX - r.left, y: ev.clientY - r.top }) }}
+                      onMouseLeave={() => setHover(null)}
+                    />
+                  </g>
+                )
+              })}
               {commits.map((cm, i) => {
                 const x = laneX(laneOf.get(cm.id)!), y = rowY(i), col = branchColor(cm.branch)
-                if (cm.working) return <circle key={cm.id} cx={x} cy={y} r={5} fill="white" stroke={col} strokeWidth={2} strokeDasharray="2 2" />
+                const dim = hover && hover.branch !== cm.branch
+                const hoverProps = {
+                  style: { pointerEvents: "all" as const, cursor: cm.working ? "default" : "pointer" },
+                  opacity: dim ? 0.25 : 1,
+                  className: "transition-opacity",
+                  onMouseEnter: () => setHover({ branch: cm.branch, x, y }),
+                  onMouseLeave: () => setHover(null),
+                  onClick: () => { if (!cm.working) setSelected(selected === cm.id ? null : cm.id) },
+                }
+                if (cm.working) return <circle key={cm.id} cx={x} cy={y} r={5} fill="white" stroke={col} strokeWidth={2} strokeDasharray="2 2" {...hoverProps} />
                 const isHead = labels.has(cm.id)
                 const isMerge = cm.parents.length > 1
                 return (
-                  <g key={cm.id}>
+                  <g key={cm.id} {...hoverProps}>
                     {selected === cm.id && <circle cx={x} cy={y} r={9} fill={col} opacity={0.2} />}
                     {isMerge
                       ? <circle cx={x} cy={y} r={4.5} fill="white" stroke={col} strokeWidth={2.5} />
                       : <circle cx={x} cy={y} r={isHead ? 6 : 4.5} fill={col} stroke="white" strokeWidth={1.5} />}
+                    <circle cx={x} cy={y} r={9} fill="transparent" />
                   </g>
                 )
               })}
             </svg>
+            {hover && (
+              <div
+                className="pointer-events-none absolute z-20 flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium text-white shadow-md"
+                style={{ left: hover.x + 12, top: hover.y - 12, background: branchColor(hover.branch) }}
+              ><GitBranch className="size-3" />{hover.branch}{hover.branch === branch && <span className="opacity-75">(current)</span>}</div>
+            )}
             {commits.map((cm, i) => {
               const isSel = selected === cm.id
               const refs = labels.get(cm.id) ?? []
