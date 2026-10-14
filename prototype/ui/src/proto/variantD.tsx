@@ -404,7 +404,7 @@ function HistoryTab() {
   )
 }
 
-function CommitDetails({ entry, onClose }: { entry: HistoryEntry | undefined; onClose: () => void }) {
+function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undefined; branch?: string; onClose: () => void }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const files = entry ? changedFilesFor(entry) : []
@@ -424,7 +424,7 @@ function CommitDetails({ entry, onClose }: { entry: HistoryEntry | undefined; on
             <dl className="grid grid-cols-[6rem_1fr] gap-y-1.5">
               <dt className="text-zinc-500">Author</dt><dd>{entry.author}{dev && ` <${entry.author.toLowerCase()}@studio.local>`}</dd>
               <dt className="text-zinc-500">Date</dt><dd>{new Date(entry.at).toISOString().slice(0, 16).replace("T", " ")}</dd>
-              <dt className="text-zinc-500">Branch</dt><dd>{p.branch}</dd>
+              <dt className="text-zinc-500">Branch</dt><dd>{branch ?? p.branch}</dd>
               <dt className="text-zinc-500">Revision</dt><dd><code>{dev ? `${entry.id}c41e09ab77f3d2e1` : entry.id}</code></dd>
               {dev && <><dt className="text-zinc-500">Parent</dt><dd><code>71cc9b20a8e4…</code></dd><dt className="text-zinc-500">Metadata</dt><dd><code>change-request: none</code></dd></>}
               {entry.local && <><dt className="text-zinc-500">Status</dt><dd className="text-amber-700">Not pushed yet</dd></>}
@@ -776,6 +776,218 @@ function AdvancedSheet() {
   )
 }
 
+// ---- Graph tab: every branch and commit as a lane graph. Mock DAG; the lane layout is the real algorithm in miniature.
+
+type GraphCommit = HistoryEntry & { branch: string; parents: string[]; working?: boolean }
+
+const BRANCH_COLORS: Record<string, string> = {
+  main: "#0284c7", "release/1.2": "#7c3aed", "feature/new-hero": "#e11d48", "art/env-pass": "#059669", "bugfix/crash-on-load": "#d97706",
+}
+const EXTRA_COLORS = ["#0d9488", "#4f46e5", "#c026d3", "#65a30d", "#ea580c"]
+function branchColor(b: string) {
+  if (BRANCH_COLORS[b]) return BRANCH_COLORS[b]
+  let h = 0
+  for (const c of b) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return EXTRA_COLORS[h % EXTRA_COLORS.length]
+}
+
+const c = (id: string, branch: string, message: string, author: string, at: number, parents: string[], files = 3): GraphCommit =>
+  ({ id, branch, message, author, at, parents, files, when: "" })
+
+// Newest first. Ids that also appear in History reuse History's ids.
+const GRAPH_COMMITS: GraphCommit[] = [
+  c("9f3c2a1e", "main", "Forest lighting pass", "Marco", NOW - 2 * HOUR, ["5d0b8e44"], 12),
+  c("a41f7c09", "feature/new-hero", "Hero rig: facial controls", "You", NOW - 5 * HOUR, ["e02a77f5"], 2),
+  c("5d0b8e44", "main", "Merge art/env-pass into main", "Marco", NOW - 8 * HOUR, ["4b81d0c7", "f7e2a913"], 21),
+  c("f7e2a913", "art/env-pass", "Rock and moss textures", "Ana", NOW - 20 * HOUR, ["2c6d1b70"], 8),
+  c("4b81d0c7", "main", "Villain textures v3", "Ana", NOW - 1 * DAY - 3 * HOUR, ["71cc9b20"], 4),
+  c("0be93d6f", "release/1.2", "Merge bugfix/crash-on-load into release/1.2", "Marco", NOW - 1 * DAY - 5 * HOUR, ["6a1e40d2", "93c7f05b"], 1),
+  c("e02a77f5", "feature/new-hero", "Hero sculpt blockout", "You", NOW - 1 * DAY - 7 * HOUR, ["1f84c2ad"], 2),
+  c("93c7f05b", "bugfix/crash-on-load", "Fix crash when forest.umap loads without textures", "Sam", NOW - 1 * DAY - 10 * HOUR, ["6a1e40d2"], 1),
+  c("2c6d1b70", "art/env-pass", "Forest tile set 03", "Ana", NOW - 2 * DAY, ["e8b5a6c1"], 6),
+  c("71cc9b20", "main", "Import footstep library", "Sam", NOW - 3 * DAY, ["d1e4b6a0"], 38),
+  c("1f84c2ad", "feature/new-hero", "Start hero rework", "You", NOW - 4 * DAY, ["d1e4b6a0"], 3),
+  c("6a1e40d2", "release/1.2", "Release 1.2 candidate", "Marco", NOW - 4 * DAY - 6 * HOUR, ["d1e4b6a0"], 2),
+  c("d1e4b6a0", "main", "Footstep variations for gravel", "Sam", NOW - 5 * DAY, ["8c72fe31"], 9),
+  c("e8b5a6c1", "art/env-pass", "Environment pass: blockout", "Ana", NOW - 7 * DAY, ["8c72fe31"], 14),
+  c("8c72fe31", "main", "Hero turnaround sheet", "Ana", NOW - 9 * DAY, ["3a90f1b2"], 3),
+  c("3a90f1b2", "main", "Project setup for vertical slice", "Marco", NOW - 16 * DAY, ["b07a9d52"], 112),
+  c("b07a9d52", "main", "Placeholder UI icons", "You", NOW - 33 * DAY, ["c55d0e7a"], 24),
+  c("c55d0e7a", "main", "Initial import", "Marco", NOW - 64 * DAY, [], 2048),
+]
+
+type Edge = { from: number; to: number; fromLane: number; via: number; toLane: number; color: string }
+
+/** Classic lane assignment: walk newest → oldest, each lane "expects" a commit id. A first parent keeps the child's lane
+ *  (so a branch stays in its column until it forks off); extra parents (merges) get their own lane straight away. */
+function layout(commits: GraphCommit[]) {
+  const lanes: (string | null)[] = []
+  const laneOf = new Map<string, number>()
+  const row = new Map(commits.map((cm, i) => [cm.id, i]))
+  const pending: { child: number; parent: string; via: number; color: string }[] = []
+  commits.forEach((cm, i) => {
+    let lane = lanes.indexOf(cm.id)
+    if (lane === -1) { lane = lanes.indexOf(null); if (lane === -1) lane = lanes.push(null) - 1 }
+    lanes.forEach((v, j) => { if (v === cm.id) lanes[j] = null })
+    laneOf.set(cm.id, lane)
+    cm.parents.filter((pid) => row.has(pid)).forEach((pid, k) => {
+      const parentColor = branchColor(commits[row.get(pid)!].branch)
+      if (k === 0) { lanes[lane] = pid; pending.push({ child: i, parent: pid, via: lane, color: branchColor(cm.branch) }); return }
+      let via = lanes.indexOf(pid)
+      if (via === -1) { via = lanes.indexOf(null); if (via === -1) via = lanes.length; lanes[via] = pid }
+      pending.push({ child: i, parent: pid, via, color: parentColor })
+    })
+  })
+  const edges: Edge[] = pending.map((e) => ({ from: e.child, to: row.get(e.parent)!, fromLane: laneOf.get(commits[e.child].id)!, via: e.via, toLane: laneOf.get(e.parent)!, color: e.color }))
+  return { laneOf, edges, width: Math.max(1, ...laneOf.values()) + 1 }
+}
+
+const ROW_H = 36
+const LANE_W = 18
+const laneX = (l: number) => 14 + l * LANE_W
+const rowY = (r: number) => r * ROW_H + ROW_H / 2
+
+/** Curve out of the child's lane in the first row if needed, run down the reserved lane, curve into the parent's lane in the last row. */
+function edgePath(e: Edge) {
+  const x1 = laneX(e.fromLane), xv = laneX(e.via), x2 = laneX(e.toLane)
+  const y1 = rowY(e.from), y2 = rowY(e.to)
+  const bend = (xa: number, ya: number, xb: number, yb: number) => `C ${xa} ${(ya + yb) / 2}, ${xb} ${(ya + yb) / 2}, ${xb} ${yb}`
+  if (e.to - e.from === 1) return `M ${x1} ${y1} ${x1 === x2 ? `L ${x2} ${y2}` : bend(x1, y1, x2, y2)}`
+  let d = `M ${x1} ${y1} `
+  let y = y1
+  if (xv !== x1) { d += bend(x1, y1, xv, y1 + ROW_H) + " "; y = y1 + ROW_H }
+  const yEnd = xv !== x2 ? y2 - ROW_H : y2
+  if (yEnd > y) d += `L ${xv} ${yEnd} `
+  if (xv !== x2) d += bend(xv, yEnd, x2, y2)
+  return d
+}
+
+function ancestors(commits: GraphCommit[], head: string) {
+  const byId = new Map(commits.map((cm) => [cm.id, cm]))
+  const seen = new Set<string>()
+  const stack = [head]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (seen.has(id) || !byId.has(id)) continue
+    seen.add(id)
+    stack.push(...byId.get(id)!.parents)
+  }
+  return seen
+}
+
+function GraphTab() {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const [scope, setScope] = useState<"all" | "current">("all")
+  const [selected, setSelected] = useState<string | null>(null)
+
+  // Heads: the newest commit on each branch. A branch made in this session (no commits yet) points at where main is.
+  const base = GRAPH_COMMITS.map((cm) => ({ ...cm }))
+  const heads = new Map<string, string>()
+  for (const cm of base) if (!heads.has(cm.branch)) heads.set(cm.branch, cm.id)
+  const branch = p.branch
+  if (!heads.has(branch)) heads.set(branch, heads.get("main")!)
+  // Commits made in this session sit on top of the current branch.
+  const fresh = p.history.filter((r) => r.local || r.when === "just now")
+  const extra: GraphCommit[] = fresh.map((r, i) => ({ ...r, at: NOW - 60_000 * (i + 1), branch, parents: [] }))
+  extra.forEach((cm, i) => { cm.parents = [extra[i + 1]?.id ?? heads.get(branch)!] })
+  if (extra.length) heads.set(branch, extra[0].id)
+  const changed = p.files.filter((f) => f.change).length
+  const working: GraphCommit[] = changed ? [{ id: "working", branch, message: `Uncommitted changes (${changed})`, author: "You", at: NOW, when: "", files: changed, parents: [heads.get(branch)!], working: true }] : []
+  let commits = [...working, ...extra, ...base]
+  if (scope === "current") { const keep = ancestors(commits, working[0]?.id ?? heads.get(branch)!); commits = commits.filter((cm) => keep.has(cm.id)) }
+
+  const { laneOf, edges, width } = layout(commits)
+  const graphW = laneX(width - 1) + 14
+  const labels = new Map<string, string[]>()
+  for (const [b, id] of heads) if (scope === "all" || b === branch) labels.set(id, [...(labels.get(id) ?? []), b])
+  const selectedEntry = commits.find((cm) => cm.id === selected && !cm.working)
+  const branchCount = new Set(commits.map((cm) => cm.branch)).size
+
+  return (
+    <div className="flex h-full">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-md border p-0.5 text-sm">
+            {([["all", "All branches"], ["current", "Current branch"]] as const).map(([k, l]) => (
+              <button key={k} onClick={() => setScope(k)} className={cn("rounded px-2.5 py-1", scope === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100")}>{l}</button>
+            ))}
+          </div>
+          <span className="text-xs text-zinc-500">{commits.length - working.length} commits · {branchCount} branch{branchCount === 1 ? "" : "es"}</span>
+          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+            {[...heads.keys()].filter((b) => scope === "all" || b === branch).map((b) => (
+              <span key={b} className="flex items-center gap-1 text-xs text-zinc-600"><span className="size-2 rounded-full" style={{ background: branchColor(b) }} />{b}</span>
+            ))}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
+          <div className="relative" style={{ height: commits.length * ROW_H, minWidth: graphW + (dev ? 520 : 450) }}>
+            <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={commits.length * ROW_H}>
+              {edges.map((e, i) => (
+                <path key={i} d={edgePath(e)} fill="none" stroke={e.color} strokeWidth={2} strokeLinecap="round" strokeDasharray={commits[e.from].working ? "3 3" : undefined} opacity={0.9} />
+              ))}
+              {commits.map((cm, i) => {
+                const x = laneX(laneOf.get(cm.id)!), y = rowY(i), col = branchColor(cm.branch)
+                if (cm.working) return <circle key={cm.id} cx={x} cy={y} r={5} fill="white" stroke={col} strokeWidth={2} strokeDasharray="2 2" />
+                const isHead = labels.has(cm.id)
+                const isMerge = cm.parents.length > 1
+                return (
+                  <g key={cm.id}>
+                    {selected === cm.id && <circle cx={x} cy={y} r={9} fill={col} opacity={0.2} />}
+                    {isMerge
+                      ? <circle cx={x} cy={y} r={4.5} fill="white" stroke={col} strokeWidth={2.5} />
+                      : <circle cx={x} cy={y} r={isHead ? 6 : 4.5} fill={col} stroke="white" strokeWidth={1.5} />}
+                  </g>
+                )
+              })}
+            </svg>
+            {commits.map((cm, i) => {
+              const isSel = selected === cm.id
+              const refs = labels.get(cm.id) ?? []
+              const rowEl = (
+                <button
+                  key={cm.id}
+                  onClick={() => cm.working ? null : setSelected(isSel ? null : cm.id)}
+                  className={cn("absolute left-0 right-0 flex items-center gap-3 border-b pr-3 text-left text-sm", isSel ? "bg-sky-50" : "hover:bg-zinc-50", cm.working && "cursor-default")}
+                  style={{ top: i * ROW_H, height: ROW_H, paddingLeft: graphW + 4 }}
+                >
+                  <span className="flex min-w-48 flex-1 items-center gap-1.5 overflow-hidden">
+                    {refs.map((b) => {
+                      const current = b === branch
+                      return (
+                        <span
+                          key={b}
+                          className={cn("flex max-w-40 shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[11px] font-medium", current && "text-white")}
+                          style={current ? { background: branchColor(b), borderColor: branchColor(b) } : { color: branchColor(b), borderColor: branchColor(b) + "66", background: branchColor(b) + "14" }}
+                          title={current ? "Current branch" : b}
+                        ><GitBranch className="size-3 shrink-0" /><span className="truncate">{b}</span></span>
+                      )
+                    })}
+                    <span className={cn("truncate", cm.working && "italic text-zinc-500", cm.parents.length > 1 && "text-zinc-500")}>{cm.message}</span>
+                    {cm.local && <Badge variant="outline" className="shrink-0 font-normal">not pushed</Badge>}
+                  </span>
+                  {!cm.working && (
+                    <>
+                      <span className="flex w-24 shrink-0 items-center gap-1.5 text-zinc-600">
+                        <span className="grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold text-white" style={{ background: branchColor(cm.author) }}>{cm.author.slice(0, 2).toUpperCase()}</span>
+                        <span className="truncate text-xs">{cm.author}</span>
+                      </span>
+                      <span className="w-24 shrink-0 text-xs text-zinc-500">{formatWhen(cm.at, dev)}</span>
+                      {dev && <code className="w-16 shrink-0 text-xs text-zinc-400">{cm.id}</code>}
+                    </>
+                  )}
+                </button>
+              )
+              return cm.working ? rowEl : <RevisionMenu key={cm.id} rev={cm}>{rowEl}</RevisionMenu>
+            })}
+          </div>
+        </div>
+      </div>
+      <CommitDetails entry={selectedEntry} branch={selectedEntry?.branch} onClose={() => setSelected(null)} />
+    </div>
+  )
+}
+
 export function VariantD() {
   const p = useProto()
   const dev = p.mode === "developer"
@@ -790,6 +1002,7 @@ export function VariantD() {
               <TabsTrigger value="staging">Staging {changed > 0 && <Badge className="ml-1 h-4 border-transparent bg-red-100 px-1.5 text-[10px] text-red-700">{changed}</Badge>}</TabsTrigger>
               <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="explorer">Explorer</TabsTrigger>
+              <TabsTrigger value="graph">Graph</TabsTrigger>
               {dev && <TabsTrigger value="log">Lore log</TabsTrigger>}
             </TabsList>
             <div className="ml-auto flex items-center gap-2">
@@ -801,6 +1014,7 @@ export function VariantD() {
           <TabsContent value="staging" className="min-h-0 flex-1"><StagingTab /></TabsContent>
           <TabsContent value="history" className="min-h-0 flex-1"><HistoryTab /></TabsContent>
           <TabsContent value="explorer" className="min-h-0 flex-1"><ExplorerTab /></TabsContent>
+          <TabsContent value="graph" className="min-h-0 flex-1"><GraphTab /></TabsContent>
           {dev && <TabsContent value="log" className="min-h-0 flex-1"><LoreLog /></TabsContent>}
         </Tabs>
         <OperationBar />
