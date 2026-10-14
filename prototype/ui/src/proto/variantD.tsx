@@ -1,5 +1,5 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (project switcher + branches) and a tabbed centre: Staging, History, Explorer.
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitBranchPlus, GitCommitHorizontal, Lock, Plus, Search, Settings, Settings2, Star, X } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitBranchPlus, GitCommitHorizontal, Lock, LogOut, Monitor, Moon, Palette, Plus, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -721,43 +721,147 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
   )
 }
 
+type SettingsSection = "general" | "account" | "theme"
+const SETTINGS_NAV: [SettingsSection, string, typeof Settings][] = [["general", "General", SlidersHorizontal], ["account", "Account", UserRound], ["theme", "Theme", Palette]]
+const SETTINGS_BLURB: Record<SettingsSection, string> = {
+  general: "How Scribe behaves in every project.",
+  account: "Who you're signed in as, and where.",
+  theme: "How Scribe looks. Applies right away.",
+}
+const ACCENTS = ["#18181b", "#0284c7", "#7c3aed", "#059669", "#e11d48", "#d97706"]
+const SERVERS: { host: string; signedIn: boolean }[] = [{ host: "studio.local", signedIn: true }, { host: "backup.studio.local", signedIn: false }]
+
 function SettingsDialog() {
   const p = useProto()
+  const [section, setSection] = useState<SettingsSection>("general")
   const [strategy, setStrategy] = useState("file")
+  const [theme, setTheme] = useState<"system" | "light" | "dark">("system")
+  const [accent, setAccent] = useState(ACCENTS[0])
+  const [density, setDensity] = useState("comfortable")
+  const [separateProfile, setSeparateProfile] = useState(false)
+  const title = SETTINGS_NAV.find(([k]) => k === section)![1]
+  const block = "space-y-2 border-b pb-5 last:border-b-0"
   return (
     <Dialog>
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-zinc-600"><Settings className="size-4" /> Settings</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Signed in to studio.local as you@studio.local.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-5 text-sm">
-          <section className="space-y-2">
-            <div className="font-medium">Mode</div>
-            <RadioGroup value={p.mode} onValueChange={(v) => p.setMode(v as Mode)} className="flex gap-4">
-              <Label className="font-normal"><RadioGroupItem value="artist" /> Artist</Label>
-              <Label className="font-normal"><RadioGroupItem value="developer" /> Developer</Label>
-            </RadioGroup>
-          </section>
-          <section className="space-y-2">
-            <div className="font-medium">Conflict resolution strategy</div>
-            <RadioGroup value={strategy} onValueChange={setStrategy} className="space-y-1">
-              <Label className="font-normal"><RadioGroupItem value="file" /> Decide file by file (Keep mine / Use theirs)</Label>
-              <Label className="font-normal"><RadioGroupItem value="branch" /> Move my work to a branch first</Label>
-            </RadioGroup>
-          </section>
-          <section className="space-y-2">
-            <div className="font-medium">Auto-lock patterns</div>
-            <p className="text-xs text-zinc-500">Shared patterns come from this project's <code>.scribelock</code>. Add your own local ones here.</p>
-            <Input placeholder="e.g. *.kra" className="font-mono text-xs" />
-          </section>
-          <section className="space-y-2">
-            <div className="font-medium">Lore profile</div>
-            <Label className="font-normal"><Checkbox /> Use a separate Lore profile (keep my sign-in apart from the Lore CLI)</Label>
-          </section>
+      <DialogContent className="flex h-[32rem] gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r bg-zinc-50/80 p-3">
+          <DialogTitle className="px-2 pb-3 pt-1 text-base">Settings</DialogTitle>
+          {SETTINGS_NAV.map(([k, l, Icon]) => (
+            <button
+              key={k}
+              onClick={() => setSection(k)}
+              className={cn("flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm", section === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-200/60")}
+            ><Icon className="size-4" /> {l}</button>
+          ))}
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <DialogHeader className="border-b px-6 py-4 text-left">
+            <div className="text-lg font-semibold">{title}</div>
+            <DialogDescription>{SETTINGS_BLURB[section]}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-5 overflow-auto px-6 py-5 text-sm">
+            {section === "general" && (
+              <>
+                <section className={block}>
+                  <div className="font-medium">Mode</div>
+                  <RadioGroup value={p.mode} onValueChange={(v) => p.setMode(v as Mode)} className="flex gap-4">
+                    <Label className="font-normal"><RadioGroupItem value="artist" /> Artist</Label>
+                    <Label className="font-normal"><RadioGroupItem value="developer" /> Developer</Label>
+                  </RadioGroup>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Conflict resolution strategy</div>
+                  <RadioGroup value={strategy} onValueChange={setStrategy} className="space-y-1">
+                    <Label className="font-normal"><RadioGroupItem value="file" /> Decide file by file (Keep mine / Use theirs)</Label>
+                    <Label className="font-normal"><RadioGroupItem value="branch" /> Move my work to a branch first</Label>
+                  </RadioGroup>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Auto-lock patterns</div>
+                  <p className="text-xs text-zinc-500">Shared patterns come from this project's <code>.scribelock</code>. Add your own local ones here.</p>
+                  <Input placeholder="e.g. *.kra" className="font-mono text-xs" />
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Projects folder</div>
+                  <div className="flex gap-2">
+                    <Input readOnly value="C:\Users\you\Scribe" className="font-mono text-xs" />
+                    <Button variant="outline" className="shrink-0" onClick={() => p.say("Folder picker")}>Change…</Button>
+                  </div>
+                </section>
+              </>
+            )}
+            {section === "account" && (
+              <>
+                <section className={cn(block, "flex items-center gap-3 space-y-0")}>
+                  <span className="grid size-11 shrink-0 place-items-center rounded-full bg-zinc-900 text-sm font-semibold text-white">YO</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium">you@studio.local</div>
+                    <div className="text-xs text-zinc-500">Signed in to <b>studio.local</b>{p.mode === "developer" && <code className="ml-1">lore://studio.local:41337</code>}</div>
+                  </div>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => p.say("Signed out of studio.local")}><LogOut className="size-4" /> Sign out</Button>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Lore Servers</div>
+                  <div className="rounded-md border">
+                    {SERVERS.map((s) => (
+                      <div key={s.host} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
+                        <span className={cn("size-2 rounded-full", s.signedIn ? "bg-emerald-500" : "bg-zinc-300")} />
+                        <span className="flex-1">{s.host}</span>
+                        <span className="text-xs text-zinc-500">{s.signedIn ? "Signed in" : "Not signed in"}</span>
+                        {!s.signedIn && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Opening sign-in in your browser…")}>Sign in</Button>}
+                      </div>
+                    ))}
+                  </div>
+                  <Button size="sm" variant="ghost" className="gap-1.5 px-1 text-zinc-600" onClick={() => p.say("Add a Lore Server")}><Plus className="size-4" /> Add a server</Button>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Lore profile</div>
+                  <Label className="font-normal"><Checkbox checked={separateProfile} onCheckedChange={(v) => setSeparateProfile(v === true)} /> Use a separate Lore profile (keep my sign-in apart from the Lore CLI)</Label>
+                  <p className="text-xs text-zinc-500">{separateProfile ? "Scribe keeps its own sign-in. Signing out here won't sign the CLI out." : "Scribe and the Lore CLI share one sign-in. Signing out here signs the CLI out too."}</p>
+                </section>
+              </>
+            )}
+            {section === "theme" && (
+              <>
+                <section className={block}>
+                  <div className="font-medium">Appearance</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {([["system", "System", Monitor], ["light", "Light", Sun], ["dark", "Dark", Moon]] as const).map(([k, l, Icon]) => (
+                      <button key={k} onClick={() => setTheme(k)} className={cn("overflow-hidden rounded-lg border text-left", theme === k ? "ring-2 ring-zinc-900 ring-offset-1" : "hover:border-zinc-400")}>
+                        <div className={cn("flex h-16 gap-1 p-2", k === "dark" ? "bg-zinc-900" : k === "light" ? "bg-white" : "bg-gradient-to-r from-white from-50% to-zinc-900 to-50%")}>
+                          <div className={cn("w-1/3 rounded", k === "dark" ? "bg-zinc-700" : "bg-zinc-200")} />
+                          <div className="flex flex-1 flex-col gap-1">
+                            <div className={cn("h-2 rounded", k === "dark" ? "bg-zinc-600" : "bg-zinc-300")} />
+                            <div className={cn("h-2 w-2/3 rounded", k === "light" ? "bg-zinc-200" : "bg-zinc-500")} />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 border-t px-2 py-1.5 text-xs"><Icon className="size-3.5" /> {l}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-zinc-400">Prototype: the choice is remembered, but the mockup stays light.</p>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Accent colour</div>
+                  <div className="flex gap-2">
+                    {ACCENTS.map((a) => (
+                      <button key={a} aria-label={`Accent ${a}`} onClick={() => setAccent(a)} className={cn("size-7 rounded-full", accent === a && "ring-2 ring-zinc-400 ring-offset-2")} style={{ background: a }} />
+                    ))}
+                  </div>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Density</div>
+                  <RadioGroup value={density} onValueChange={setDensity} className="flex gap-4">
+                    <Label className="font-normal"><RadioGroupItem value="comfortable" /> Comfortable</Label>
+                    <Label className="font-normal"><RadioGroupItem value="compact" /> Compact</Label>
+                  </RadioGroup>
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
