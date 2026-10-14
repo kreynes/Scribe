@@ -1,6 +1,6 @@
 // PROTOTYPE: building blocks used by Variant D. Throwaway code.
 import type { ReactNode } from "react"
-import { GitBranchPlus, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
+import { GitBranchPlus, Info, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -86,7 +86,7 @@ export function RevisionMenu({ rev, children }: { rev: Revision; children: React
   )
 }
 
-export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreateFrom }: { name: string; children: ReactNode; favorite?: boolean; onToggleFavorite?: () => void; onCreateFrom?: () => void }) {
+export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreateFrom, onInfo }: { name: string; children: ReactNode; favorite?: boolean; onToggleFavorite?: () => void; onCreateFrom?: () => void; onInfo?: () => void }) {
   const p = useProto()
   return (
     <ContextMenu>
@@ -95,6 +95,7 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreat
         <ContextMenuLabel>{name}</ContextMenuLabel>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={name === p.branch} onClick={() => switchBranch(p, name)}>Switch to this branch</ContextMenuItem>
+        {onInfo && <ContextMenuItem onClick={onInfo}><Info /> Branch information…</ContextMenuItem>}
         {onToggleFavorite && (
           <ContextMenuItem onClick={onToggleFavorite}>
             <Star className={cn(favorite && "fill-amber-400 text-amber-500")} /> {favorite ? "Remove from favorites" : "Add to favorites"}

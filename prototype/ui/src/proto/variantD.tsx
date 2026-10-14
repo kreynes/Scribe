@@ -1,14 +1,15 @@
-// PROTOTYPE: Variant D, the user's layout. Side panel (project switcher + branches) and a tabbed centre: Staging, History, Explorer.
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, GitBranchPlus, GitCommitHorizontal, Lock, LogOut, Monitor, Moon, Palette, Plus, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, X } from "lucide-react"
+// PROTOTYPE: Variant D, the user's layout. Side panel (logo, project switcher, branches, account) and a tabbed centre: Staging, History, Explorer, Graph.
+import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, HistoryIcon, Info, Lock, LogOut, Monitor, Moon, Palette, Plus, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, UserRoundPlus, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,7 +20,23 @@ import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Mode, 
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
-const PROJECTS = ["forest-game", "ui-kit", "cinematics"]
+type ProjectInfo = { name: string; server: string; url: string; path: string; size: string; branches: number; lastSync: string; defaultBranch: string; viewFilter: string; members: number }
+const PROJECTS: ProjectInfo[] = [
+  { name: "forest-game", server: "studio.local", url: "lore://studio.local:41337/forest-game", path: "C:\\Users\\you\\Scribe\\forest-game", size: "48.2 GB", branches: 12, lastSync: "2 minutes ago", defaultBranch: "main", viewFilter: "Art/**, Audio/**, Content/**, Source/**", members: 9 },
+  { name: "ui-kit", server: "studio.local", url: "lore://studio.local:41337/ui-kit", path: "C:\\Users\\you\\Scribe\\ui-kit", size: "1.3 GB", branches: 4, lastSync: "yesterday", defaultBranch: "main", viewFilter: "everything", members: 3 },
+  { name: "cinematics", server: "backup.studio.local", url: "lore://backup.studio.local:41337/cinematics", path: "D:\\Projects\\cinematics", size: "212 GB", branches: 7, lastSync: "5 days ago", defaultBranch: "main", viewFilter: "Shots/**, Edit/**", members: 5 },
+]
+
+type Account = { email: string; server: string; initials: string }
+const ACCOUNTS: Account[] = [
+  { email: "you@studio.local", server: "studio.local", initials: "YO" },
+  { email: "you@backup.studio.local", server: "backup.studio.local", initials: "YB" },
+  { email: "kim@freelance.games", server: "lore.freelance.games", initials: "KF" },
+]
+
+function Avatar({ initials, className, style }: { initials: string; className?: string; style?: React.CSSProperties }) {
+  return <span className={cn("grid size-6 shrink-0 place-items-center rounded-full bg-zinc-900 text-[10px] font-semibold text-white", className)} style={style}>{initials}</span>
+}
 
 // Mock "now" for the prototype, so relative dates are stable.
 const NOW = new Date("2026-10-14T16:00:00Z").getTime()
@@ -47,15 +64,20 @@ function LockIcon({ file }: { file: FileEntry }) {
 
 function SidePanel() {
   const p = useProto()
-  const [project, setProject] = useState(PROJECTS[0])
+  const dev = p.mode === "developer"
+  const [project, setProject] = useState(PROJECTS[0].name)
+  const [account, setAccount] = useState(ACCOUNTS[0])
+  const [settings, setSettings] = useState<SettingsSection | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [favOnly, setFavOnly] = useState(false)
   const [favorites, setFavorites] = useState(() => new Set(["release/1.2"]))
   const [branches, setBranches] = useState(BRANCHES)
   const [newFrom, setNewFrom] = useState<string | null>(null)
+  const [infoFor, setInfoFor] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { if (searchOpen) inputRef.current?.focus() }, [searchOpen])
+  const info = PROJECTS.find((pr) => pr.name === project)!
 
   const toggleFav = (b: string) => setFavorites((s) => {
     const n = new Set(s)
@@ -70,13 +92,14 @@ function SidePanel() {
     p.setBranch(b)
     p.say("Switched to " + b)
   }
+  const switchAccount = (a: Account) => { setAccount(a); p.say(`Switched to ${a.email}`) }
   const q = searchOpen ? search.trim().toLowerCase() : ""
   const visible = branches.filter((b) => (!q || b.toLowerCase().includes(q)) && (!favOnly || favorites.has(b)))
   const favs = visible.filter((b) => favorites.has(b))
   const rest = visible.filter((b) => !favorites.has(b))
 
   const row = (b: string) => (
-    <BranchMenu key={b} name={b} favorite={favorites.has(b)} onToggleFavorite={() => toggleFav(b)} onCreateFrom={() => setNewFrom(b)}>
+    <BranchMenu key={b} name={b} favorite={favorites.has(b)} onToggleFavorite={() => toggleFav(b)} onCreateFrom={() => setNewFrom(b)} onInfo={() => setInfoFor(b)}>
       <li
         onDoubleClick={() => switchTo(b)}
         className={cn("flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm", b === p.branch ? "bg-zinc-900 text-white" : "hover:bg-zinc-200/60")}
@@ -94,15 +117,52 @@ function SidePanel() {
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r bg-zinc-50/60">
+      <div className="flex items-center gap-2 border-b px-3 py-3">
+        <span className="grid size-7 place-items-center rounded-lg bg-zinc-900 text-white"><Feather className="size-4" /></span>
+        <span className="text-base font-semibold tracking-tight">Scribe</span>
+        <span className="ml-auto rounded border px-1.5 py-px text-[10px] text-zinc-400">for Lore</span>
+      </div>
       <div className="border-b p-3">
-        <Select value={project} onValueChange={setProject}>
-          <SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {PROJECTS.map((pr) => <SelectItem key={pr} value={pr}>{pr}</SelectItem>)}
-            <div className="border-t px-2 py-1.5 text-xs text-zinc-500">+ Clone or open a project…</div>
-          </SelectContent>
-        </Select>
-        {p.mode === "developer" && <code className="mt-1.5 block truncate text-[10px] text-zinc-400">lore://studio.local:41337/{project}</code>}
+        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">Project</div>
+        <div className="flex items-center gap-1">
+          <Select
+            value={project}
+            onValueChange={(v) => {
+              if (v === "__clone") return p.say("Clone or open a project…")
+              if (v === "__manage") return setSettings("projects")
+              setProject(v)
+              p.say("Opened " + v)
+            }}
+          >
+            <SelectTrigger className="min-w-0 flex-1 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PROJECTS.map((pr) => <SelectItem key={pr.name} value={pr.name}>{pr.name}</SelectItem>)}
+              <SelectSeparator />
+              <SelectItem value="__clone"><Plus /> Clone or open a project…</SelectItem>
+              <SelectItem value="__manage"><Settings /> Manage projects…</SelectItem>
+            </SelectContent>
+          </Select>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button aria-label="Project information" className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-900"><Info className="size-4" /></button>
+              </TooltipTrigger>
+              <TooltipContent side="right" align="start" className="w-96 max-w-none p-3">
+                <div className="mb-2 text-sm font-semibold">{info.name}</div>
+                <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-xs">
+                  <dt className="opacity-60">Server</dt><dd>{info.server}</dd>
+                  <dt className="opacity-60">Address</dt><dd className="break-all font-mono text-[11px]">{info.url}</dd>
+                  <dt className="opacity-60">Local folder</dt><dd className="break-all font-mono text-[11px]">{info.path}</dd>
+                  <dt className="opacity-60">Size on disk</dt><dd>{info.size}</dd>
+                  <dt className="opacity-60">Branches</dt><dd>{info.branches}</dd>
+                  <dt className="opacity-60">Members</dt><dd>{info.members}</dd>
+                  <dt className="opacity-60">Last synced</dt><dd>{info.lastSync}</dd>
+                  {dev && <><dt className="opacity-60">View filter</dt><dd className="font-mono text-[11px]">{info.viewFilter}</dd></>}
+                </dl>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
       <div className="flex items-center gap-1 px-3 pb-1 pt-3">
         <span className="flex-1 text-xs font-medium uppercase tracking-wide text-zinc-500">Branches</span>
@@ -129,6 +189,12 @@ function SidePanel() {
           else p.say(`Created ${name} from ${base}`)
         }}
       />
+      <BranchInfoDialog
+        name={infoFor}
+        favorite={!!infoFor && favorites.has(infoFor)}
+        onClose={() => setInfoFor(null)}
+        onSwitch={(b) => { setInfoFor(null); switchTo(b) }}
+      />
       <div className={cn("grid px-2 transition-[grid-template-rows,opacity] duration-200 ease-out", searchOpen ? "grid-rows-[1fr] opacity-100" : "pointer-events-none grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
           <div className="relative py-1">
@@ -153,10 +219,131 @@ function SidePanel() {
         {!visible.length && <li className="px-2 py-3 text-xs text-zinc-400">{favOnly && !favorites.size ? "No favorites yet. Right-click a branch → Add to favorites." : "No branches match."}</li>}
       </ul>
       <p className="px-3 pb-2 text-[11px] text-zinc-400">Double-click or right-click → Switch.</p>
-      <div className="border-t p-2"><SettingsDialog /></div>
+      <div className="flex items-center gap-1 border-t p-2">
+        <AccountMenu account={account} onSwitch={switchAccount} onOpenAccounts={() => setSettings("account")} />
+        <Button variant="ghost" size="sm" className="shrink-0 gap-2 text-zinc-600" onClick={() => setSettings("general")}><Settings className="size-4" /> Settings</Button>
+      </div>
+      <SettingsDialog
+        section={settings}
+        onSection={setSettings}
+        account={account}
+        onSwitchAccount={switchAccount}
+        project={project}
+        onOpenProject={(name) => { setProject(name); setSettings(null); p.say("Opened " + name) }}
+      />
     </aside>
   )
 }
+
+function AccountMenu({ account, onSwitch, onOpenAccounts }: { account: Account; onSwitch: (a: Account) => void; onOpenAccounts: () => void }) {
+  const p = useProto()
+  const [open, setOpen] = useState(false)
+  const item = "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-zinc-100 [&_svg]:size-4 [&_svg]:text-zinc-500"
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-zinc-200/60" title={`${account.email} on ${account.server}`}>
+          <Avatar initials={account.initials} />
+          <span className="min-w-0 flex-1 truncate text-sm text-zinc-700">{account.email.split("@")[0]}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-zinc-400" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-72 p-1">
+        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-zinc-500">Switch account</div>
+        {ACCOUNTS.map((a) => (
+          <button key={a.email} className={item} onClick={() => { setOpen(false); if (a.email !== account.email) onSwitch(a) }}>
+            <Avatar initials={a.initials} className={cn(a.email !== account.email && "bg-zinc-400")} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{a.email}</span>
+              <span className="block truncate text-xs text-zinc-500">{a.server}</span>
+            </span>
+            {a.email === account.email && <Check className="text-zinc-900!" />}
+          </button>
+        ))}
+        <div className="-mx-1 my-1 border-t" />
+        <button className={item} onClick={() => { setOpen(false); p.say("Opening sign-in in your browser…") }}><UserRoundPlus /> Add account…</button>
+        <button className={item} onClick={() => { setOpen(false); onOpenAccounts() }}><UserRound /> Accounts…</button>
+        <button className={item} onClick={() => { setOpen(false); p.say(`Signed out of ${account.server}`) }}><LogOut /> Sign out</button>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** Right-click a branch → Branch information… Facts come from the mock graph where the branch has commits there. */
+function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string | null; favorite: boolean; onClose: () => void; onSwitch: (b: string) => void }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const b = name ?? ""
+  const own = GRAPH_COMMITS.filter((cm) => cm.branch === b)
+  const mainHead = GRAPH_COMMITS.find((cm) => cm.branch === "main")!
+  const head = own[0] ?? mainHead
+  const oldest = own[own.length - 1]
+  const baseCommit = oldest ? GRAPH_COMMITS.find((cm) => cm.id === oldest.parents[0]) : mainHead
+  const isMain = b === "main"
+  const behind = baseCommit && !isMain ? GRAPH_COMMITS.filter((cm) => cm.branch === "main" && cm.at > baseCommit.at).length : 0
+  const mergedInto = own.length ? GRAPH_COMMITS.find((cm) => cm.branch !== b && cm.parents.slice(1).includes(head.id))?.branch : undefined
+  const contributors = [...new Set((own.length ? own : [head]).map((cm) => cm.author))]
+  const createdBy = oldest?.author ?? "You"
+  const createdAt = oldest?.at ?? NOW - 10 * 60_000
+  const isProtected = isMain || b.startsWith("release/")
+  const locks = b === p.branch ? p.files.concat(PROJECT_TREE).filter((f, i, a) => f.lock && a.findIndex((g) => g.path === f.path) === i).length : own.length ? (own.length * 3) % 5 : 0
+  const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => <><dt className="text-zinc-500">{label}</dt><dd className="min-w-0">{children}</dd></>
+  return (
+    <Dialog open={name !== null} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="size-2.5 rounded-full" style={{ background: branchColor(b) }} />
+            <span className="truncate">{b}</span>
+            {b === p.branch && <Badge variant="secondary" className="font-normal">current</Badge>}
+            {favorite && <Star className="size-4 fill-amber-400 text-amber-500" />}
+          </DialogTitle>
+          <DialogDescription>
+            {isMain ? "The project's default branch." : `Started from ${baseCommit?.branch ?? "main"} by ${createdBy}, ${formatWhen(createdAt, false)}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              [own.length || 0, own.length === 1 ? "commit" : "commits"],
+              [isMain ? "–" : behind, isMain ? "default branch" : `behind main`],
+              [locks, locks === 1 ? "locked file" : "locked files"],
+            ].map(([n, l]) => (
+              <div key={l as string} className="rounded-lg border bg-zinc-50 px-3 py-2">
+                <div className="text-lg font-semibold">{n}</div>
+                <div className="text-xs text-zinc-500">{l}</div>
+              </div>
+            ))}
+          </div>
+          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-xs">
+            <Fact label="Latest commit">
+              <div className="truncate">{head.message}</div>
+              <div className="text-zinc-500">{head.author} · {formatWhen(head.at, false)}{dev && <> · <code>{head.id}</code></>}</div>
+            </Fact>
+            {!isMain && <Fact label="Started from">{baseCommit?.branch ?? "main"}{dev && baseCommit && <> at <code>{baseCommit.id}</code></>}</Fact>}
+            {!isMain && <Fact label="Created">{createdBy}, {new Date(createdAt).toISOString().slice(0, 16).replace("T", " ")}</Fact>}
+            <Fact label="Merged">{isMain ? "–" : mergedInto ? <span className="text-emerald-700">Yes, into {mergedInto}</span> : "Not merged yet"}</Fact>
+            <Fact label="Protected">{isProtected ? "Yes: changes need a review before they land" : "No"}</Fact>
+            <Fact label="Contributors">
+              <span className="flex flex-wrap items-center gap-1">
+                {contributors.map((a) => <span key={a} className="flex items-center gap-1 rounded-full border py-px pl-px pr-2"><Avatar initials={a.slice(0, 2).toUpperCase()} className="size-4 text-[8px]" style={{ background: branchColor(a) }} />{a}</span>)}
+              </span>
+            </Fact>
+            {dev && <Fact label="Ref"><code>refs/branches/{b}</code></Fact>}
+          </dl>
+        </div>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="ghost" onClick={() => p.say("Copied " + b)}><Copy className="size-4" /> Copy name</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+            <Button disabled={b === p.branch} onClick={() => onSwitch(b)}>Switch to this branch</Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 
 function FileLine({ file, checked, onCheck, selected, onSelect }: { file: FileEntry; checked: boolean; onCheck: () => void; selected: boolean; onSelect: () => void }) {
   const dev = useProto().mode === "developer"
@@ -572,11 +759,14 @@ function ExplorerTab() {
   const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
   const [dateFilter, setDateFilter] = useState<DateValue>({ kind: "preset", preset: "any" })
   const [revFilter, setRevFilter] = useState("any")
+  const [lockedOnly, setLockedOnly] = useState(false)
   const q = query.trim().toLowerCase()
   const dateActive = !(dateFilter.kind === "preset" && dateFilter.preset === "any")
-  const filtering = !!q || dateActive || revFilter !== "any"
+  const filtering = !!q || dateActive || revFilter !== "any" || lockedOnly
+  const lockedCount = all.filter((f) => f.lock).length
   const matches = all.filter((f) => {
     const meta = fileMeta(f)
+    if (lockedOnly && !f.lock) return false
     if (q && !f.path.toLowerCase().includes(q)) return false
     if (!matchesDate(dateFilter, meta.at)) return false
     if (revFilter === "working") return meta.rev === null
@@ -598,13 +788,18 @@ function ExplorerTab() {
         </div>
         <DateRangeFilter value={dateFilter} onChange={setDateFilter} today={new Date(NOW)} />
         <RevisionFilter value={revFilter} onChange={setRevFilter} revisions={revOptions} />
+        <Button
+          size="sm" variant="outline" aria-pressed={lockedOnly}
+          className={cn("h-8 gap-1.5", lockedOnly && "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800")}
+          onClick={() => setLockedOnly(!lockedOnly)}
+        ><Lock className="size-4" /> Show locked <span className={cn("rounded px-1 text-[10px]", lockedOnly ? "bg-red-100" : "bg-zinc-100 text-zinc-500")}>{lockedCount}</span></Button>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set(folderPaths(fullTree)))}><ChevronsUpDown className="size-4" /> Expand all</Button>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set())}><ChevronsDownUp className="size-4" /> Collapse all</Button>
       </div>
       <div className="text-xs text-zinc-500">
         {p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Content/**, Source/** … · ` : `Files on ${p.branch} · `}
         {matches.length} file{matches.length === 1 ? "" : "s"}{filtering && " matching"}
-        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any") }}>Clear filters</button>}
+        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any"); setLockedOnly(false) }}>Clear filters</button>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
         <div className="flex items-center gap-2 border-b bg-zinc-50 py-1.5 pl-3 pr-3 text-[11px] font-medium uppercase text-zinc-500">
@@ -721,49 +916,60 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
   )
 }
 
-type SettingsSection = "general" | "account" | "theme"
-const SETTINGS_NAV: [SettingsSection, string, typeof Settings][] = [["general", "General", SlidersHorizontal], ["account", "Account", UserRound], ["theme", "Theme", Palette]]
+type SettingsSection = "general" | "account" | "projects" | "theme"
+const SETTINGS_NAV: [SettingsSection, string, typeof Settings][] = [["general", "General", SlidersHorizontal], ["account", "Account", UserRound], ["projects", "Projects", FolderGit2], ["theme", "Theme", Palette]]
 const SETTINGS_BLURB: Record<SettingsSection, string> = {
   general: "How Scribe behaves in every project.",
   account: "Who you're signed in as, and where.",
+  projects: "Every project on this computer. Open, configure or remove them.",
   theme: "How Scribe looks. Applies right away.",
 }
 const ACCENTS = ["#18181b", "#0284c7", "#7c3aed", "#059669", "#e11d48", "#d97706"]
-const SERVERS: { host: string; signedIn: boolean }[] = [{ host: "studio.local", signedIn: true }, { host: "backup.studio.local", signedIn: false }]
+const SERVERS = [...new Set(ACCOUNTS.map((a) => a.server))]
 
-function SettingsDialog() {
+type SettingsProps = {
+  section: SettingsSection | null
+  onSection: (s: SettingsSection | null) => void
+  account: Account
+  onSwitchAccount: (a: Account) => void
+  project: string
+  onOpenProject: (name: string) => void
+}
+
+/** Opened from the side panel's Settings button, the Account menu (→ Account) or the project switcher (→ Projects). */
+function SettingsDialog({ section, onSection, account, onSwitchAccount, project, onOpenProject }: SettingsProps) {
   const p = useProto()
-  const [section, setSection] = useState<SettingsSection>("general")
   const [strategy, setStrategy] = useState("file")
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system")
   const [accent, setAccent] = useState(ACCENTS[0])
   const [density, setDensity] = useState("comfortable")
   const [separateProfile, setSeparateProfile] = useState(false)
-  const title = SETTINGS_NAV.find(([k]) => k === section)![1]
+  // Keep showing the last page while the dialog animates closed.
+  const last = useRef<SettingsSection>("general")
+  if (section) last.current = section
+  const current = last.current
+  const title = SETTINGS_NAV.find(([k]) => k === current)![1]
   const block = "space-y-2 border-b pb-5 last:border-b-0"
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-zinc-600"><Settings className="size-4" /> Settings</Button>
-      </DialogTrigger>
-      <DialogContent className="flex h-[32rem] gap-0 overflow-hidden p-0 sm:max-w-3xl">
+    <Dialog open={section !== null} onOpenChange={(o) => { if (!o) onSection(null) }}>
+      <DialogContent className="flex h-[34rem] gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r bg-zinc-50/80 p-3">
           <DialogTitle className="px-2 pb-3 pt-1 text-base">Settings</DialogTitle>
           {SETTINGS_NAV.map(([k, l, Icon]) => (
             <button
               key={k}
-              onClick={() => setSection(k)}
-              className={cn("flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm", section === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-200/60")}
+              onClick={() => onSection(k)}
+              className={cn("flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm", current === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-200/60")}
             ><Icon className="size-4" /> {l}</button>
           ))}
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
           <DialogHeader className="border-b px-6 py-4 text-left">
             <div className="text-lg font-semibold">{title}</div>
-            <DialogDescription>{SETTINGS_BLURB[section]}</DialogDescription>
+            <DialogDescription>{SETTINGS_BLURB[current]}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-5 overflow-auto px-6 py-5 text-sm">
-            {section === "general" && (
+            {current === "general" && (
               <>
                 <section className={block}>
                   <div className="font-medium">Mode</div>
@@ -786,6 +992,7 @@ function SettingsDialog() {
                 </section>
                 <section className={block}>
                   <div className="font-medium">Projects folder</div>
+                  <p className="text-xs text-zinc-500">Where new projects are cloned to.</p>
                   <div className="flex gap-2">
                     <Input readOnly value="C:\Users\you\Scribe" className="font-mono text-xs" />
                     <Button variant="outline" className="shrink-0" onClick={() => p.say("Folder picker")}>Change…</Button>
@@ -793,27 +1000,48 @@ function SettingsDialog() {
                 </section>
               </>
             )}
-            {section === "account" && (
+            {current === "account" && (
               <>
                 <section className={cn(block, "flex items-center gap-3 space-y-0")}>
-                  <span className="grid size-11 shrink-0 place-items-center rounded-full bg-zinc-900 text-sm font-semibold text-white">YO</span>
+                  <Avatar initials={account.initials} className="size-11 text-sm" />
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium">you@studio.local</div>
-                    <div className="text-xs text-zinc-500">Signed in to <b>studio.local</b>{p.mode === "developer" && <code className="ml-1">lore://studio.local:41337</code>}</div>
+                    <div className="font-medium">{account.email}</div>
+                    <div className="text-xs text-zinc-500">Signed in to <b>{account.server}</b></div>
                   </div>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => p.say("Signed out of studio.local")}><LogOut className="size-4" /> Sign out</Button>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => p.say(`Signed out of ${account.server}`)}><LogOut className="size-4" /> Sign out</Button>
+                </section>
+                <section className={block}>
+                  <div className="font-medium">Accounts on this computer</div>
+                  <div className="rounded-md border">
+                    {ACCOUNTS.map((a) => (
+                      <div key={a.email} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
+                        <Avatar initials={a.initials} className={cn(a.email !== account.email && "bg-zinc-400")} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{a.email}</span>
+                          <span className="block text-xs text-zinc-500">{a.server}</span>
+                        </span>
+                        {a.email === account.email
+                          ? <Badge variant="secondary" className="font-normal">In use</Badge>
+                          : <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => onSwitchAccount(a)}>Switch</Button>}
+                      </div>
+                    ))}
+                  </div>
+                  <Button size="sm" variant="ghost" className="gap-1.5 px-1 text-zinc-600" onClick={() => p.say("Opening sign-in in your browser…")}><UserRoundPlus className="size-4" /> Add account</Button>
                 </section>
                 <section className={block}>
                   <div className="font-medium">Lore Servers</div>
                   <div className="rounded-md border">
-                    {SERVERS.map((s) => (
-                      <div key={s.host} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
-                        <span className={cn("size-2 rounded-full", s.signedIn ? "bg-emerald-500" : "bg-zinc-300")} />
-                        <span className="flex-1">{s.host}</span>
-                        <span className="text-xs text-zinc-500">{s.signedIn ? "Signed in" : "Not signed in"}</span>
-                        {!s.signedIn && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Opening sign-in in your browser…")}>Sign in</Button>}
-                      </div>
-                    ))}
+                    {SERVERS.map((host) => {
+                      const signedIn = host !== "lore.freelance.games"
+                      return (
+                        <div key={host} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
+                          <span className={cn("size-2 rounded-full", signedIn ? "bg-emerald-500" : "bg-zinc-300")} />
+                          <span className="flex-1">{host}</span>
+                          <span className="text-xs text-zinc-500">{signedIn ? "Signed in" : "Sign-in expired"}</span>
+                          {!signedIn && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Opening sign-in in your browser…")}>Sign in</Button>}
+                        </div>
+                      )
+                    })}
                   </div>
                   <Button size="sm" variant="ghost" className="gap-1.5 px-1 text-zinc-600" onClick={() => p.say("Add a Lore Server")}><Plus className="size-4" /> Add a server</Button>
                 </section>
@@ -824,7 +1052,8 @@ function SettingsDialog() {
                 </section>
               </>
             )}
-            {section === "theme" && (
+            {current === "projects" && <ProjectsSettings project={project} onOpenProject={onOpenProject} />}
+            {current === "theme" && (
               <>
                 <section className={block}>
                   <div className="font-medium">Appearance</div>
@@ -865,6 +1094,83 @@ function SettingsDialog() {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Settings → Projects: one row per project; click a row to expand its info and settings. */
+function ProjectsSettings({ project, onOpenProject }: { project: string; onOpenProject: (name: string) => void }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const [expanded, setExpanded] = useState<string | null>(project)
+  const [autoSync, setAutoSync] = useState<Record<string, boolean>>({ "forest-game": true })
+  const [defaults, setDefaults] = useState<Record<string, string>>({})
+  const [removing, setRemoving] = useState<string | null>(null)
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => p.say("Clone a project…")}><Plus className="size-4" /> Clone a project…</Button>
+        <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => p.say("Open a folder…")}><FolderOpen className="size-4" /> Open a folder…</Button>
+      </div>
+      <div className="rounded-lg border">
+        {PROJECTS.map((pr) => {
+          const isOpen = expanded === pr.name
+          const isCurrent = pr.name === project
+          return (
+            <div key={pr.name} className="border-b last:border-b-0">
+              <button className={cn("flex w-full items-center gap-3 px-3 py-2.5 text-left", isOpen ? "bg-zinc-50" : "hover:bg-zinc-50")} onClick={() => setExpanded(isOpen ? null : pr.name)}>
+                <ChevronRight className={cn("size-4 shrink-0 text-zinc-400 transition-transform", isOpen && "rotate-90")} />
+                <FolderGit2 className="size-4 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 font-medium">{pr.name}{isCurrent && <Badge variant="secondary" className="font-normal">open</Badge>}</span>
+                  <span className="block truncate text-xs text-zinc-500">{pr.server} · {pr.size} · synced {pr.lastSync}</span>
+                </span>
+              </button>
+              {isOpen && (
+                <div className="space-y-4 border-t bg-white px-4 py-3 pl-10 text-xs">
+                  <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1.5">
+                    <dt className="text-zinc-500">Server</dt><dd>{pr.server}</dd>
+                    <dt className="text-zinc-500">Address</dt><dd className="break-all font-mono text-[11px]">{pr.url}</dd>
+                    <dt className="text-zinc-500">Local folder</dt><dd className="break-all font-mono text-[11px]">{pr.path}</dd>
+                    <dt className="text-zinc-500">Size on disk</dt><dd>{pr.size}</dd>
+                    <dt className="text-zinc-500">Branches</dt><dd>{pr.branches}</dd>
+                    <dt className="text-zinc-500">Members</dt><dd>{pr.members}</dd>
+                    <dt className="text-zinc-500">Last synced</dt><dd>{pr.lastSync}</dd>
+                  </dl>
+                  <div className="grid grid-cols-[6.5rem_1fr] items-center gap-x-3 gap-y-2">
+                    <span className="text-zinc-500">Open on</span>
+                    <Select value={defaults[pr.name] ?? pr.defaultBranch} onValueChange={(v) => setDefaults({ ...defaults, [pr.name]: v })}>
+                      <SelectTrigger size="sm" className="w-48"><SelectValue /></SelectTrigger>
+                      <SelectContent>{["main", "release/1.2", "Last used branch"].map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <span className="text-zinc-500">Sync</span>
+                    <Label className="text-xs font-normal"><Checkbox checked={!!autoSync[pr.name]} onCheckedChange={(v) => setAutoSync({ ...autoSync, [pr.name]: v === true })} /> Sync automatically when the project opens</Label>
+                    <span className="text-zinc-500">View filter</span>
+                    <span className="flex items-center gap-2">
+                      <code className="truncate text-[11px]">{pr.viewFilter}</code>
+                      {dev && <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs" onClick={() => p.say("Edit view filter file")}>Edit…</Button>}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                    <Button size="sm" disabled={isCurrent} onClick={() => onOpenProject(pr.name)}>{isCurrent ? "Open now" : "Open"}</Button>
+                    <Button size="sm" variant="outline" onClick={() => p.say("Showing " + pr.path)}>Show in folder</Button>
+                    <Button size="sm" variant="outline" onClick={() => p.say("Moving " + pr.name + "…")}>Move…</Button>
+                    {removing === pr.name ? (
+                      <span className="ml-auto flex items-center gap-2">
+                        <span className="text-zinc-600">Remove from Scribe? Files stay on disk.</span>
+                        <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>Cancel</Button>
+                        <Button size="sm" variant="destructive" onClick={() => { setRemoving(null); p.say(`Removed ${pr.name} from Scribe`) }}>Remove</Button>
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700" disabled={isCurrent} title={isCurrent ? "Switch to another project first" : undefined} onClick={() => setRemoving(pr.name)}>Remove from Scribe…</Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -1129,11 +1435,11 @@ export function VariantD() {
         <Tabs defaultValue="staging" className="flex min-h-0 flex-1 flex-col gap-0">
           <div className="flex items-center gap-2 border-b px-3 py-2">
             <TabsList>
-              <TabsTrigger value="staging">Staging {changed > 0 && <Badge className="ml-1 h-4 border-transparent bg-red-100 px-1.5 text-[10px] text-red-700">{changed}</Badge>}</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-              <TabsTrigger value="explorer">Explorer</TabsTrigger>
-              <TabsTrigger value="graph">Graph</TabsTrigger>
-              {dev && <TabsTrigger value="log">Lore log</TabsTrigger>}
+              <TabsTrigger value="staging"><FileDiff /> Staging {changed > 0 && <Badge className="ml-1 h-4 border-transparent bg-red-100 px-1.5 text-[10px] text-red-700">{changed}</Badge>}</TabsTrigger>
+              <TabsTrigger value="history"><HistoryIcon /> History</TabsTrigger>
+              <TabsTrigger value="explorer"><FolderTree /> Explorer</TabsTrigger>
+              <TabsTrigger value="graph"><GitGraph /> Graph</TabsTrigger>
+              {dev && <TabsTrigger value="log"><ScrollText /> Lore log</TabsTrigger>}
             </TabsList>
             <div className="ml-auto flex items-center gap-2">
               {!dev && <AdvancedSheet />}
