@@ -1,9 +1,13 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (project switcher + branches) and a tabbed centre: Staging, History, Explorer.
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, File, Folder, FolderOpen, GitBranch, Lock, Settings2 } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, GitBranch, Lock, Search, Settings, Settings2 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu, Thumb } from "./shared"
-import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Revision } from "./state"
+import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Mode, type Revision } from "./state"
+import { FileTypeIcon } from "./fileTypes"
 
 const PROJECTS = ["forest-game", "ui-kit", "cinematics"]
 
@@ -71,7 +76,8 @@ function SidePanel() {
           </BranchMenu>
         ))}
       </ul>
-      <p className="p-3 text-[11px] text-zinc-400">Double-click or right-click → Switch.</p>
+      <p className="px-3 pb-2 text-[11px] text-zinc-400">Double-click or right-click → Switch.</p>
+      <div className="border-t p-2"><SettingsDialog /></div>
     </aside>
   )
 }
@@ -84,6 +90,7 @@ function FileLine({ file, checked, onCheck }: { file: FileEntry; checked: boolea
         <Checkbox checked={checked} onCheckedChange={onCheck} />
         {!dev && <Thumb file={file} size="sm" />}
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <FileTypeIcon path={file.path} />
           <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? file.path : fileName(file.path)}</span>
           <LockIcon file={file} />
         </span>
@@ -117,7 +124,7 @@ function StagingTab() {
         {dev ? (
           <>
             <Section title="Staged" files={staged} action={<button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => ({ ...f, staged: false })))}>Unstage all</button>} />
-            <Section title="Changed, not staged" files={unstaged} action={<button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => (f.change ? { ...f, staged: true } : f)))}>Stage all</button>} />
+            <Section title="Changes" files={unstaged} action={<button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => (f.change ? { ...f, staged: true } : f)))}>Stage all</button>} />
           </>
         ) : (
           <Section title="Your changes" files={changed} />
@@ -186,6 +193,7 @@ function HistoryTab() {
                           <div className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
                             {!dev && <Thumb file={f} size="sm" />}
                             <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                              <FileTypeIcon path={f.path} />
                               <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? f.path : fileName(f.path)}</span>
                               <LockIcon file={f} />
                             </span>
@@ -227,45 +235,120 @@ function buildTree(files: FileEntry[]): Node {
   return root
 }
 
-function TreeNode({ node, depth }: { node: Node; depth: number }) {
+type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean }
+
+function TreeNode({ node, depth, open, toggle, forceOpen }: TreeProps) {
   const dev = useProto().mode === "developer"
-  const [open, setOpen] = useState(depth < 2)
   if (node.file) {
     const f = node.file
     return (
       <FileMenu file={f}>
         <div className="flex items-center gap-2 py-1 pr-3 hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
-          {dev ? <File className="size-3.5 text-zinc-400" /> : <Thumb file={f} size="sm" />}
+          {dev ? <FileTypeIcon path={f.path} /> : <Thumb file={f} size="sm" />}
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
             <LockIcon file={f} />
+            <ChangeBadge file={f} />
           </span>
-          {dev && <span className="w-16 text-right text-[11px] text-zinc-400">{f.size}</span>}
-          <ChangeBadge file={f} />
+          <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-zinc-400">{f.size}</span>
         </div>
       </FileMenu>
     )
   }
+  const isOpen = forceOpen || open.has(node.path)
   return (
     <div>
-      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 py-1 pr-3 text-left hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
-        <ChevronRight className={cn("size-3.5 text-zinc-400 transition", open && "rotate-90")} />
-        {open ? <FolderOpen className="size-4 text-amber-500" /> : <Folder className="size-4 text-amber-500" />}
+      <button onClick={() => toggle(node.path)} className="flex w-full items-center gap-2 py-1 pr-3 text-left hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
+        <ChevronRight className={cn("size-3.5 text-zinc-400 transition", isOpen && "rotate-90")} />
+        {isOpen ? <FolderOpen className="size-4 text-amber-500" /> : <Folder className="size-4 text-amber-500" />}
         <span className="text-sm">{node.name}</span>
       </button>
-      {open && node.children.map((c) => <TreeNode key={c.path} node={c} depth={depth + 1} />)}
+      {isOpen && node.children.map((c) => <TreeNode key={c.path} node={c} depth={depth + 1} open={open} toggle={toggle} forceOpen={forceOpen} />)}
     </div>
   )
 }
 
+function folderPaths(node: Node, maxDepth = Infinity, depth = 0, acc: string[] = []) {
+  for (const c of node.children) {
+    if (c.file) continue
+    if (depth < maxDepth) acc.push(c.path)
+    folderPaths(c, maxDepth, depth + 1, acc)
+  }
+  return acc
+}
+
 function ExplorerTab() {
   const p = useProto()
-  const tree = useMemo(() => buildTree(PROJECT_TREE.map((t) => p.files.find((f) => f.path === t.path) ?? t)), [p.files])
+  const [query, setQuery] = useState("")
+  const all = useMemo(() => PROJECT_TREE.map((t) => p.files.find((f) => f.path === t.path) ?? t), [p.files])
+  const fullTree = useMemo(() => buildTree(all), [all])
+  const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
+  const q = query.trim().toLowerCase()
+  const matches = q ? all.filter((f) => f.path.toLowerCase().includes(q)) : all
+  const tree = useMemo(() => (q ? buildTree(matches) : fullTree), [q, matches, fullTree])
+  const toggle = (path: string) => setOpen((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n })
   return (
-    <div className="h-full overflow-auto p-4">
-      <div className="mb-2 text-xs text-zinc-500">{p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Levels/forest.umap` : `Files on ${p.branch}`}</div>
-      <div className="rounded-lg border py-1">{tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} />)}</div>
+    <div className="flex h-full flex-col gap-2 p-4">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files…" className="h-8 pl-8" />
+        </div>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set(folderPaths(fullTree)))}><ChevronsUpDown className="size-4" /> Expand all</Button>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set())}><ChevronsDownUp className="size-4" /> Collapse all</Button>
+      </div>
+      <div className="text-xs text-zinc-500">
+        {p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Content/**, Source/** … · ` : `Files on ${p.branch} · `}
+        {matches.length} file{matches.length === 1 ? "" : "s"}{q && " matching"}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto rounded-lg border py-1">
+        {tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} open={open} toggle={toggle} forceOpen={!!q} />)}
+        {!tree.children.length && <p className="px-3 py-3 text-sm text-zinc-400">No files match "{query}".</p>}
+      </div>
     </div>
+  )
+}
+
+function SettingsDialog() {
+  const p = useProto()
+  const [strategy, setStrategy] = useState("file")
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-zinc-600"><Settings className="size-4" /> Settings</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>Signed in to studio.local as you@studio.local.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 text-sm">
+          <section className="space-y-2">
+            <div className="font-medium">Mode</div>
+            <RadioGroup value={p.mode} onValueChange={(v) => p.setMode(v as Mode)} className="flex gap-4">
+              <Label className="font-normal"><RadioGroupItem value="artist" /> Artist</Label>
+              <Label className="font-normal"><RadioGroupItem value="developer" /> Developer</Label>
+            </RadioGroup>
+          </section>
+          <section className="space-y-2">
+            <div className="font-medium">Conflict resolution strategy</div>
+            <RadioGroup value={strategy} onValueChange={setStrategy} className="space-y-1">
+              <Label className="font-normal"><RadioGroupItem value="file" /> Decide file by file (Keep mine / Use theirs)</Label>
+              <Label className="font-normal"><RadioGroupItem value="branch" /> Move my work to a branch first</Label>
+            </RadioGroup>
+          </section>
+          <section className="space-y-2">
+            <div className="font-medium">Auto-lock patterns</div>
+            <p className="text-xs text-zinc-500">Shared patterns come from this project's <code>.scribelock</code>. Add your own local ones here.</p>
+            <Input placeholder="e.g. *.kra" className="font-mono text-xs" />
+          </section>
+          <section className="space-y-2">
+            <div className="font-medium">Lore profile</div>
+            <Label className="font-normal"><Checkbox /> Use a separate Lore profile (keep my sign-in apart from the Lore CLI)</Label>
+          </section>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -1,6 +1,7 @@
 // PROTOTYPE: building blocks shared by all three layout variants. Throwaway code.
 import { useState, type ReactNode } from "react"
-import { AudioLines, Box, FileText, GitBranch, Image, Lock, LockOpen, Map, Pin, PinOff, TriangleAlert, X } from "lucide-react"
+import { GitBranch, Lock, LockOpen, Pin, PinOff, TriangleAlert, X } from "lucide-react"
+import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -11,11 +12,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { BRANCHES, LORE_LOG, fileName, lockLabel, useProto, type FileEntry, type Revision } from "./state"
 
-const KIND_ICON = { image: Image, model: Box, audio: AudioLines, scene: Map, text: FileText }
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
 export function Thumb({ file, size = "md" }: { file: FileEntry; size?: "sm" | "md" | "lg" }) {
-  const Icon = KIND_ICON[file.kind]
+  const Icon = typeOf(file.path).icon
   const box = size === "sm" ? "size-8" : size === "md" ? "size-12" : "h-28 w-full"
   return (
     <div className={cn("grid shrink-0 place-items-center rounded-md bg-gradient-to-br text-zinc-600", KIND_TINT[file.kind], box)}>

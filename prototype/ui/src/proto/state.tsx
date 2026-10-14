@@ -45,6 +45,17 @@ export const PROJECT_TREE: FileEntry[] = [
   { path: "Art/Env/forest_tile_02.png", kind: "image", change: null, staged: false, ticked: false, lock: null, size: "13 MB" },
   { path: "Levels/forest.umap", kind: "scene", change: null, staged: false, ticked: false, lock: { by: "Marco" }, size: "420 MB" },
   { path: "Audio/ambience_forest.wav", kind: "audio", change: null, staged: false, ticked: false, lock: null, size: "31 MB" },
+  { path: "Art/Characters/hero_body.fbx", kind: "model", change: null, staged: false, ticked: false, lock: null, size: "54 MB" },
+  { path: "Art/Env/rock_normal.tga", kind: "image", change: null, staged: false, ticked: false, lock: null, size: "22 MB" },
+  { path: "Content/Characters/Hero.uasset", kind: "scene", change: null, staged: false, ticked: false, lock: { by: "Ana" }, size: "18 MB" },
+  { path: "Cinematics/intro.mp4", kind: "image", change: null, staged: false, ticked: false, lock: null, size: "640 MB" },
+  { path: "Config/DefaultGame.ini", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "3 KB" },
+  { path: "Data/balance.csv", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "41 KB" },
+  { path: "Data/loot_tables.json", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "12 KB" },
+  { path: "Source/Game/PlayerController.cpp", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "28 KB" },
+  { path: "Tools/importer.ts", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "9 KB" },
+  { path: "UI/Fonts/Inter.ttf", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "310 KB" },
+  { path: "Builds/playtest_0912.zip", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "2.1 GB" },
 ]
 
 const INITIAL_HISTORY: Revision[] = [
