@@ -164,7 +164,7 @@ export function ConflictScreen() {
   )
 }
 
-const VARIANTS: [Variant, string][] = [["A", "Three-pane desktop"], ["B", "Status-first column"], ["C", "File browser + team board"]]
+const VARIANTS: [Variant, string][] = [["A", "Three-pane desktop"], ["B", "Status-first column"], ["C", "File browser + team board"], ["D", "Side panel + tabs"]]
 const SCREENS: [Screen, string][] = [["onboarding", "Onboarding"], ["main", "Main"], ["conflict", "Conflict"]]
 
 /** Prototype-only control bar. Arrow keys cycle variants. */

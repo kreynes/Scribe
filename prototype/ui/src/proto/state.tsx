@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
 export type Mode = "artist" | "developer"
-export type Variant = "A" | "B" | "C"
+export type Variant = "A" | "B" | "C" | "D"
 export type Screen = "onboarding" | "main" | "conflict"
 
 export type LockState = { by: "you" } | { by: string } | null
@@ -105,7 +105,7 @@ function writeParam(key: string, value: string) {
 
 export function ProtoProvider({ children }: { children: ReactNode }) {
   const [mode, setModeS] = useState<Mode>(() => readParam("mode", ["artist", "developer"] as const, "artist"))
-  const [variant, setVariantS] = useState<Variant>(() => readParam("variant", ["A", "B", "C"] as const, "A"))
+  const [variant, setVariantS] = useState<Variant>(() => readParam("variant", ["A", "B", "C", "D"] as const, "D"))
   const [screen, setScreenS] = useState<Screen>(() => readParam("screen", ["onboarding", "main", "conflict"] as const, "main"))
   const [branch, setBranch] = useState("main")
   const [branchPanePinned, setBranchPanePinned] = useState(false)

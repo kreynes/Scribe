@@ -5,6 +5,7 @@ import { ConflictScreen, Onboarding, PrototypeSwitcher } from "./proto/screens"
 import { ExpiredBanner, LockWarningDialog, Toast } from "./proto/shared"
 import { ProtoProvider, useProto } from "./proto/state"
 import { VariantA, VariantB, VariantC } from "./proto/variants"
+import { VariantD } from "./proto/variantD"
 
 function Shell() {
   const p = useProto()
@@ -14,7 +15,7 @@ function Shell() {
       <div className="min-h-0 flex-1 pb-14">
         {p.screen === "onboarding" && <Onboarding />}
         {p.screen === "conflict" && <ConflictScreen />}
-        {p.screen === "main" && (p.variant === "A" ? <VariantA /> : p.variant === "B" ? <VariantB /> : <VariantC />)}
+        {p.screen === "main" && (p.variant === "A" ? <VariantA /> : p.variant === "B" ? <VariantB /> : p.variant === "C" ? <VariantC /> : <VariantD />)}
       </div>
       <LockWarningDialog />
       <Toast />
