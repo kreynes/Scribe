@@ -235,12 +235,55 @@ function buildTree(files: FileEntry[]): Node {
   return root
 }
 
+// Mock per-file "last modified" metadata: the revision that last touched the file, and when.
+const NOW = new Date("2026-10-14T16:00:00Z").getTime()
+const HOUR = 3600_000
+const DAY = 24 * HOUR
+const FILE_REVS = [
+  { id: "9f3c2a1e", message: "Forest lighting pass", at: NOW - 2 * HOUR },
+  { id: "4b81d0c7", message: "Villain textures v3", at: NOW - 1 * DAY - 3 * HOUR },
+  { id: "e02a77f5", message: "Hero sculpt blockout", at: NOW - 1 * DAY - 7 * HOUR },
+  { id: "71cc9b20", message: "Import footstep library", at: NOW - 3 * DAY },
+  { id: "3a90f1b2", message: "Project setup for vertical slice", at: NOW - 16 * DAY },
+  { id: "c55d0e7a", message: "Initial import", at: NOW - 64 * DAY },
+]
+
+function fileMeta(f: FileEntry) {
+  if (f.change) return { rev: null, at: NOW - 10 * 60_000 }
+  let h = 0
+  for (const c of f.path) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  const r = FILE_REVS[h % FILE_REVS.length]
+  return { rev: r.id, at: r.at }
+}
+
+function formatWhen(at: number, dev: boolean) {
+  if (dev) return new Date(at).toISOString().slice(0, 16).replace("T", " ")
+  const d = NOW - at
+  if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))} min ago`
+  if (d < DAY) return `${Math.round(d / HOUR)} hours ago`
+  if (d < 2 * DAY) return "yesterday"
+  if (d < 30 * DAY) return `${Math.round(d / DAY)} days ago`
+  return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+
+const DATE_FILTERS = {
+  any: { label: "Any time", test: () => true },
+  today: { label: "Today", test: (at: number) => NOW - at < DAY },
+  week: { label: "Last 7 days", test: (at: number) => NOW - at < 7 * DAY },
+  month: { label: "Last 30 days", test: (at: number) => NOW - at < 30 * DAY },
+  older: { label: "Older than 30 days", test: (at: number) => NOW - at >= 30 * DAY },
+} as const
+type DateFilter = keyof typeof DATE_FILTERS
+
+const COLS = "grid grid-cols-[5.5rem_9rem_6rem_5rem] items-center gap-2 shrink-0"
+
 type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean }
 
 function TreeNode({ node, depth, open, toggle, forceOpen }: TreeProps) {
   const dev = useProto().mode === "developer"
   if (node.file) {
     const f = node.file
+    const meta = fileMeta(f)
     return (
       <FileMenu file={f}>
         <div className="flex items-center gap-2 py-1 pr-3 hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
@@ -248,9 +291,13 @@ function TreeNode({ node, depth, open, toggle, forceOpen }: TreeProps) {
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
             <LockIcon file={f} />
-            <ChangeBadge file={f} />
           </span>
-          <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-zinc-400">{f.size}</span>
+          <span className={cn(COLS, "text-[11px] tabular-nums text-zinc-500")}>
+            <span className="flex justify-end"><ChangeBadge file={f} /></span>
+            <span className="text-right">{formatWhen(meta.at, dev)}</span>
+            <span className="text-right">{meta.rev ? <code className="text-zinc-500">{meta.rev}</code> : <span className="text-amber-700">working copy</span>}</span>
+            <span className="text-right text-zinc-400">{f.size}</span>
+          </span>
         </div>
       </FileMenu>
     )
@@ -283,27 +330,60 @@ function ExplorerTab() {
   const all = useMemo(() => PROJECT_TREE.map((t) => p.files.find((f) => f.path === t.path) ?? t), [p.files])
   const fullTree = useMemo(() => buildTree(all), [all])
   const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
+  const [dateFilter, setDateFilter] = useState<DateFilter>("any")
+  const [revFilter, setRevFilter] = useState("any")
   const q = query.trim().toLowerCase()
-  const matches = q ? all.filter((f) => f.path.toLowerCase().includes(q)) : all
-  const tree = useMemo(() => (q ? buildTree(matches) : fullTree), [q, matches, fullTree])
+  const filtering = !!q || dateFilter !== "any" || revFilter !== "any"
+  const matches = all.filter((f) => {
+    const meta = fileMeta(f)
+    if (q && !f.path.toLowerCase().includes(q)) return false
+    if (!DATE_FILTERS[dateFilter].test(meta.at)) return false
+    if (revFilter === "working" ? meta.rev !== null : revFilter !== "any" && meta.rev !== revFilter) return false
+    return true
+  })
+  const tree = useMemo(() => (filtering ? buildTree(matches) : fullTree), [filtering, matches, fullTree])
   const toggle = (path: string) => setOpen((s) => { const n = new Set(s); if (n.has(path)) n.delete(path); else n.add(path); return n })
   return (
     <div className="flex h-full flex-col gap-2 p-4">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files…" className="h-8 pl-8" />
         </div>
+        <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
+          <SelectTrigger size="sm" className="w-52"><span className="text-zinc-500">Modified:</span><SelectValue /></SelectTrigger>
+          <SelectContent>{(Object.keys(DATE_FILTERS) as DateFilter[]).map((k) => <SelectItem key={k} value={k}>{DATE_FILTERS[k].label}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={revFilter} onValueChange={setRevFilter}>
+          <SelectTrigger size="sm" className="w-44"><span className="text-zinc-500">Revision:</span><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="working">Working copy (changed)</SelectItem>
+            {FILE_REVS.map((r) => <SelectItem key={r.id} value={r.id}><code>{r.id}</code> <span className="text-zinc-500">{r.message}</span></SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set(folderPaths(fullTree)))}><ChevronsUpDown className="size-4" /> Expand all</Button>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setOpen(new Set())}><ChevronsDownUp className="size-4" /> Collapse all</Button>
       </div>
       <div className="text-xs text-zinc-500">
         {p.mode === "developer" ? `${p.branch} · view filter: Art/**, Audio/**, Content/**, Source/** … · ` : `Files on ${p.branch} · `}
-        {matches.length} file{matches.length === 1 ? "" : "s"}{q && " matching"}
+        {matches.length} file{matches.length === 1 ? "" : "s"}{filtering && " matching"}
+        {filtering && <button className="ml-2 underline" onClick={() => { setQuery(""); setDateFilter("any"); setRevFilter("any") }}>Clear filters</button>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded-lg border py-1">
-        {tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} open={open} toggle={toggle} forceOpen={!!q} />)}
-        {!tree.children.length && <p className="px-3 py-3 text-sm text-zinc-400">No files match "{query}".</p>}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+        <div className="flex items-center gap-2 border-b bg-zinc-50 py-1.5 pl-3 pr-3 text-[11px] font-medium uppercase text-zinc-500">
+          <span className="flex-1">Name</span>
+          <span className={COLS}>
+            <span className="text-right">Status</span>
+            <span className="text-right">Modified</span>
+            <span className="text-right">Revision</span>
+            <span className="text-right">Size</span>
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto py-1">
+          {tree.children.map((c) => <TreeNode key={c.path} node={c} depth={0} open={open} toggle={toggle} forceOpen={filtering} />)}
+          {!tree.children.length && <p className="px-3 py-3 text-sm text-zinc-400">No files match these filters.</p>}
+        </div>
       </div>
     </div>
   )
