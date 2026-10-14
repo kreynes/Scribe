@@ -32,6 +32,11 @@ jobs:
           # cfg experiments.
           - { name: linux-no-uuid-unstable, os: ubuntu-latest, mode: check, rustflags: "--cfg tokio_unstable" }
           - { name: linux-no-tokio-unstable, os: ubuntu-latest, mode: check, rustflags: "--cfg uuid_unstable" }
+          # Neither cfg at all: full build + smoke run (a dummy cfg keeps RUSTFLAGS non-empty
+          # so it still overrides the config tables).
+          - { name: linux-no-cfgs, os: ubuntu-latest, mode: build, rustflags: "--cfg spike_dummy" }
+          - { name: windows-no-cfgs, os: windows-latest, mode: build, rustflags: "-C target-feature=+crt-static" }
+          - { name: macos-no-cfgs, os: macos-latest, mode: build, rustflags: "--cfg spike_dummy" }
           # Do Tauri's http/updater plugins pull in aws-lc-rs?
           - { name: linux-plugins, os: ubuntu-latest, mode: plugins }
     defaults:
@@ -114,6 +119,11 @@ jobs:
           code=0; "$BIN" --smoke > smoke.txt 2>&1 || code=$?
           cat smoke.txt
           echo "smoke exit code: $code"
+          [ $code -eq 0 ] || exit $code
+          echo "--- again with SMOKE_TLS_FIRST=1"
+          SMOKE_TLS_FIRST=1 "$BIN" --smoke > smoke2.txt 2>&1 || code=$?
+          cat smoke2.txt
+          echo "smoke (tls first) exit code: $code"
           exit $code
 
       - name: Sizes

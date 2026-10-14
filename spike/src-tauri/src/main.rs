@@ -49,6 +49,20 @@ async fn local_user_info(on_event: Channel<serde_json::Value>) -> Result<i32, St
 
 /// Headless check for CI: make the Lore call without creating a window.
 fn smoke() -> ! {
+    println!(
+        "rustls default provider before Lore call: {}",
+        rustls::crypto::CryptoProvider::get_default().is_some()
+    );
+    if std::env::var_os("SMOKE_TLS_FIRST").is_some() {
+        // Simulate a plugin (e.g. updater on reqwest 0.13 `rustls-no-provider`) building a
+        // rustls config before Lore's first call has installed ring as the process default.
+        let builder = rustls::ClientConfig::builder();
+        drop(builder);
+        println!(
+            "built rustls ClientConfig before Lore call; default provider now installed: {}",
+            rustls::crypto::CryptoProvider::get_default().is_some()
+        );
+    }
     let saw_complete = Arc::new(AtomicBool::new(false));
     let flag = saw_complete.clone();
     let status = call_local_user_info(move |value| {
