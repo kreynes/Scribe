@@ -8,11 +8,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { BranchMenu, ChangeBadge, FileMenu, LockBadge, LoreLog, OperationBar, RevisionMenu, Thumb } from "./shared"
+import { BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu, Thumb } from "./shared"
 import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Revision } from "./state"
 
 const PROJECTS = ["forest-game", "ui-kit", "cinematics"]
+
+/** Icon-only lock marker next to a filename: gray if mine, red if someone else's, tooltip says who. */
+function LockIcon({ file }: { file: FileEntry }) {
+  if (!file.lock) return null
+  const mine = file.lock.by === "you"
+  const label = mine ? "Locked by you" : `Locked by ${file.lock.by}`
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span aria-label={label} className="inline-flex shrink-0 cursor-default">
+            <Lock className={cn("size-3.5", mine ? "text-zinc-400" : "text-red-600")} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 function SidePanel() {
   const p = useProto()
@@ -63,10 +83,12 @@ function FileLine({ file, checked, onCheck }: { file: FileEntry; checked: boolea
       <div className="flex items-center gap-3 px-3 py-1.5 hover:bg-zinc-50">
         <Checkbox checked={checked} onCheckedChange={onCheck} />
         {!dev && <Thumb file={file} size="sm" />}
-        <span className={cn("min-w-0 flex-1 truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? file.path : fileName(file.path)}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? file.path : fileName(file.path)}</span>
+          <LockIcon file={file} />
+        </span>
         {!dev && <span className="hidden truncate text-xs text-zinc-400 lg:block">{file.path.split("/").slice(0, -1).join(" / ")}</span>}
         <ChangeBadge file={file} />
-        <LockBadge file={file} />
       </div>
     </FileMenu>
   )
@@ -163,7 +185,10 @@ function HistoryTab() {
                         <FileMenu key={f.path} file={f}>
                           <div className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
                             {!dev && <Thumb file={f} size="sm" />}
-                            <span className={cn("flex-1 truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? f.path : fileName(f.path)}</span>
+                            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                              <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{dev ? f.path : fileName(f.path)}</span>
+                              <LockIcon file={f} />
+                            </span>
                             <Badge variant="outline" className="font-normal">modified</Badge>
                           </div>
                         </FileMenu>
@@ -211,10 +236,12 @@ function TreeNode({ node, depth }: { node: Node; depth: number }) {
       <FileMenu file={f}>
         <div className="flex items-center gap-2 py-1 pr-3 hover:bg-zinc-50" style={{ paddingLeft: depth * 16 + 12 }}>
           {dev ? <File className="size-3.5 text-zinc-400" /> : <Thumb file={f} size="sm" />}
-          <span className={cn("flex-1 truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className={cn("truncate", dev ? "font-mono text-xs" : "text-sm")}>{node.name}</span>
+            <LockIcon file={f} />
+          </span>
           {dev && <span className="w-16 text-right text-[11px] text-zinc-400">{f.size}</span>}
           <ChangeBadge file={f} />
-          {f.lock && (dev ? <LockBadge file={f} /> : <span className={cn("rounded-full p-1 text-white", f.lock.by === "you" ? "bg-zinc-900" : "bg-red-600")} title={f.lock.by === "you" ? "Locked by you" : `Locked by ${f.lock.by}`}><Lock className="size-3" /></span>)}
         </div>
       </FileMenu>
     )
