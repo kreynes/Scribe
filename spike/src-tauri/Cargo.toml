@@ -1,0 +1,37 @@
+[package]
+name = "scribe-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway spike: does a minimal Tauri 2 app embedding Lore build? (kreynes/Scribe#12)"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+# Lore: git dependency pinned to a release tag (nothing is on crates.io).
+lore = { git = "https://github.com/EpicGames/lore", tag = "v0.10.1" }
+# Only used to report which rustls crypto provider is the process default after
+# Lore's first call. No features beyond std, so it adds no provider itself.
+rustls = { version = "0.23", default-features = false, features = ["std"] }
+
+# Optional plugins, only to see whether they drag aws-lc-rs into the graph.
+tauri-plugin-http = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+
+[features]
+default = []
+plugins = ["dep:tauri-plugin-http", "dep:tauri-plugin-updater"]
+
+# A patch table belongs to the workspace root, so a consumer outside Lore's
+# workspace must restate Lore's. lore-transport does not compile against the
+# published quinn-proto; glob-match fixes a `**` defect in ignore/view filters.
+[patch.crates-io]
+quinn-proto = { git = "https://github.com/EpicGames/lore", tag = "v0.10.1" }
+glob-match = { git = "https://github.com/EpicGames/lore", tag = "v0.10.1" }
+
+# Lore uses line tables only in dev for link time; mirror it.
+[profile.dev]
+debug = "line-tables-only"

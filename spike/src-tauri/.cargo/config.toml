@@ -1,0 +1,17 @@
+# Lore's .cargo/config.toml is never read for a dependency, so restate the
+# flags its code compiles against. A [target.<triple>] rustflags table fully
+# REPLACES [build] rustflags, so every target block repeats the cfgs.
+# CI variants override all of this with the RUSTFLAGS env var.
+[build]
+rustflags = ["--cfg", "tokio_unstable", "--cfg", "uuid_unstable"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "--cfg", "tokio_unstable",
+    "--cfg", "uuid_unstable",
+    "-C", "target-feature=+crt-static",
+]
+
+[env]
+# Keep calls in-process; never relay to a user's installed Lore service.
+LORE_USE_SERVICE = "0"

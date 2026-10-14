@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Scribe spike</title>
+  <style>body { font-family: system-ui, sans-serif; margin: 16px; } pre { white-space: pre-wrap; }</style>
+</head>
+<body>
+  <h1>Scribe spike</h1>
+  <button id="go">Call lore::auth::local_user_info</button>
+  <pre id="out"></pre>
+  <script>
+    const out = document.getElementById('out');
+    document.getElementById('go').addEventListener('click', async () => {
+      const { invoke, Channel } = window.__TAURI__.core;
+      out.textContent = '';
+      const onEvent = new Channel();
+      onEvent.onmessage = (ev) => { out.textContent += JSON.stringify(ev) + '\n'; };
+      const status = await invoke('local_user_info', { onEvent });
+      out.textContent += 'status: ' + status + '\n';
+    });
+  </script>
+</body>
+</html>

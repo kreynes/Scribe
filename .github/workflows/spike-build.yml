@@ -1,0 +1,136 @@
+name: spike-build
+
+# Throwaway CI for kreynes/Scribe#12: does a minimal Tauri 2 app embedding Lore build?
+on:
+  push:
+    branches: ["spike/**"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  LORE_USE_SERVICE: "0"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Baselines: the recommended recipe (.cargo/config.toml as committed), full tauri bundle.
+          - { name: windows, os: windows-latest, mode: bundle, bundles: nsis }
+          - { name: macos, os: macos-latest, mode: bundle, bundles: app }
+          - { name: linux, os: ubuntu-latest, mode: bundle, bundles: deb }
+          # CRT experiments (RUSTFLAGS overrides every config rustflags table).
+          # Tauri default without +crt-static: static vcruntime + dynamic ucrt ("hybrid").
+          - { name: windows-hybrid-crt, os: windows-latest, mode: build, rustflags: "--cfg tokio_unstable --cfg uuid_unstable" }
+          # Plain dynamic CRT (/MD everywhere except rpmalloc's forced /MT).
+          - { name: windows-dynamic-crt, os: windows-latest, mode: build, rustflags: "--cfg tokio_unstable --cfg uuid_unstable", static_vcruntime: "false" }
+          # +crt-static with Tauri's static_vcruntime switched off: fully static CRT.
+          - { name: windows-full-static-crt, os: windows-latest, mode: build, static_vcruntime: "false" }
+          # cfg experiments.
+          - { name: linux-no-uuid-unstable, os: ubuntu-latest, mode: check, rustflags: "--cfg tokio_unstable" }
+          - { name: linux-no-tokio-unstable, os: ubuntu-latest, mode: check, rustflags: "--cfg uuid_unstable" }
+          # Do Tauri's http/updater plugins pull in aws-lc-rs?
+          - { name: linux-plugins, os: ubuntu-latest, mode: plugins }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply variant env
+        run: |
+          if [ -n "${{ matrix.rustflags }}" ]; then echo "RUSTFLAGS=${{ matrix.rustflags }}" >> "$GITHUB_ENV"; fi
+          if [ -n "${{ matrix.static_vcruntime }}" ]; then echo "STATIC_VCRUNTIME=${{ matrix.static_vcruntime }}" >> "$GITHUB_ENV"; fi
+          rustc -Vv
+          cargo -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike/src-tauri
+          key: ${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate icons
+        working-directory: spike
+        run: npx --yes @tauri-apps/cli@2 icon app-icon.png
+
+      - name: Dependency graph report
+        working-directory: spike/src-tauri
+        run: |
+          FEATS=""
+          if [ "${{ matrix.mode }}" = "plugins" ]; then FEATS="--features plugins"; fi
+          cargo generate-lockfile
+          echo "::group::cargo tree -i aws-lc-rs"; cargo tree $FEATS -i aws-lc-rs -e normal,build || echo "aws-lc-rs: NOT IN GRAPH"; echo "::endgroup::"
+          echo "::group::cargo tree -i aws-lc-sys"; cargo tree $FEATS -i aws-lc-sys -e normal,build || echo "aws-lc-sys: NOT IN GRAPH"; echo "::endgroup::"
+          echo "::group::cargo tree -i ring"; cargo tree $FEATS -i ring -e normal,build || echo "ring: NOT IN GRAPH"; echo "::endgroup::"
+          echo "::group::cargo tree -i rustls -e features"; cargo tree $FEATS -i rustls -e features || true; echo "::endgroup::"
+          echo "::group::cargo tree -d (duplicates)"; cargo tree $FEATS -d -e normal,build || true; echo "::endgroup::"
+          echo "::group::key versions"; cargo tree $FEATS -e normal --depth 0 -p tokio -p reqwest -p rustls -p bitcode -p quinn-proto -p glob-match -p uuid -p tauri -p tauri-build 2>/dev/null || true; echo "::endgroup::"
+          echo "::group::patched sources"; grep -A2 -E '^name = "(quinn-proto|glob-match|bitcode|uuid|tauri|tokio|rustls|reqwest)"$' Cargo.lock || true; echo "::endgroup::"
+          echo "duplicate package count: $(cargo tree $FEATS -d -e normal,build --depth 0 2>/dev/null | grep -cE '^[a-z]' || true)"
+
+      - name: cargo check (variant)
+        if: matrix.mode == 'check'
+        working-directory: spike/src-tauri
+        run: cargo check --locked
+
+      - name: cargo check (plugins)
+        if: matrix.mode == 'plugins'
+        working-directory: spike/src-tauri
+        run: cargo check --locked --features plugins
+
+      - name: cargo build (debug)
+        if: matrix.mode == 'build'
+        working-directory: spike/src-tauri
+        run: time cargo build --locked
+
+      - name: tauri build (release bundle)
+        if: matrix.mode == 'bundle'
+        working-directory: spike/src-tauri
+        run: time npx --yes @tauri-apps/cli@2 build --ci --bundles ${{ matrix.bundles }}
+
+      - name: Smoke test (headless Lore call)
+        if: matrix.mode == 'build' || matrix.mode == 'bundle'
+        working-directory: spike/src-tauri
+        run: |
+          PROFILE=debug; [ "${{ matrix.mode }}" = "bundle" ] && PROFILE=release
+          BIN=target/$PROFILE/scribe-spike; [ "$RUNNER_OS" = "Windows" ] && BIN="$BIN.exe"
+          ls -l "$BIN"
+          code=0; "$BIN" --smoke > smoke.txt 2>&1 || code=$?
+          cat smoke.txt
+          echo "smoke exit code: $code"
+          exit $code
+
+      - name: Sizes
+        if: matrix.mode == 'bundle'
+        working-directory: spike/src-tauri/target/release
+        run: |
+          ls -l scribe-spike* || true
+          du -sh bundle/* || true
+          find bundle -maxdepth 3 -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.msi' \) -exec ls -l {} \; || true
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows' && (matrix.mode == 'build' || matrix.mode == 'bundle')
+
+      - name: Windows CRT imports (dumpbin)
+        if: runner.os == 'Windows' && (matrix.mode == 'build' || matrix.mode == 'bundle')
+        working-directory: spike/src-tauri
+        shell: pwsh
+        run: |
+          $p = if ("${{ matrix.mode }}" -eq "bundle") { "release" } else { "debug" }
+          dumpbin /nologo /dependents "target\$p\scribe-spike.exe"
