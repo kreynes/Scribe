@@ -595,11 +595,11 @@ function StagingTab() {
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           {dev ? (
             <>
-              <Section title="Staged" files={staged} action={<button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => ({ ...f, staged: false })))}>Unstage all</button>} />
-              <Section title="Changes" files={unstaged} action={<button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => (f.change ? { ...f, staged: true } : f)))}>Stage all</button>} />
+              {Section({ title: "Staged", files: staged, action: <button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => ({ ...f, staged: false })))}>Unstage all</button> })}
+              {Section({ title: "Changes", files: unstaged, action: <button className="normal-case text-zinc-500 hover:text-zinc-900" onClick={() => p.setFiles(p.files.map((f) => (f.change ? { ...f, staged: true } : f)))}>Stage all</button> })}
             </>
           ) : (
-            <Section title="Your changes" files={changed} />
+            Section({ title: "Your changes", files: changed })
           )}
         </div>
         <div className="space-y-2 border-t pt-3">

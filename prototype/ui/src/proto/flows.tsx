@@ -1,6 +1,6 @@
 // PROTOTYPE: dialogs for the core Lore flows (diff, merge, sync, switch, locks). Opened from anywhere via p.openFlow().
 // Every option maps to a real `lore` flag (docs/reference/lore-cli-commands.md); Developer Mode shows the equivalent command.
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowRight, CircleAlert, Columns2, Eye, FileDiff, GitBranch, GitMerge, Lock, LockOpen, Rows3, Search, SplitSquareHorizontal, TriangleAlert, Undo2, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowRight, ChevronsLeftRight, CircleAlert, Columns2, Eye, FileDiff, GitBranch, GitMerge, Lock, LockOpen, Rows3, Search, SplitSquareHorizontal, TriangleAlert, Undo2, X } from "lucide-react"
 import { Fragment, useMemo, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -258,6 +258,7 @@ function TextDiff({ path, ctx, ws, split, diff3 }: { path: string; ctx: number; 
 function BinaryDiff({ file, before, after }: { file: FileEntry; before: string; after: string }) {
   const [view, setView] = useState<"side" | "swipe">("side")
   const [x, setX] = useState(50)
+  const swipeTo = (e: React.PointerEvent<HTMLDivElement>) => { const r = e.currentTarget.getBoundingClientRect(); setX(Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100))) }
   const facts = binaryFacts(file)
   const old = "grayscale-[60%] hue-rotate-30"
   return (
@@ -271,14 +272,26 @@ function BinaryDiff({ file, before, after }: { file: FileEntry; before: string; 
       )}
       {view === "swipe" && file.kind === "image" ? (
         <div className="space-y-2">
-          <div className="relative h-56 overflow-hidden rounded-lg border">
-            <div className={cn("absolute inset-0 [&>div]:h-full!", old)}><Thumb file={file} size="lg" /></div>
-            <div className="absolute inset-0 [&>div]:h-full!" style={{ clipPath: `inset(0 0 0 ${x}%)` }}><Thumb file={file} size="lg" /></div>
-            <div className="absolute inset-y-0 w-0.5 bg-white shadow" style={{ left: `${x}%` }} />
-            <span className="absolute left-2 top-2 rounded bg-black/60 px-1.5 text-[11px] text-white">{before}</span>
-            <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[11px] text-white">{after}</span>
+          {/* Drag the divider (or click anywhere on the image) to move it. Arrow keys work once it has focus. */}
+          <div
+            className="relative h-56 cursor-ew-resize touch-none select-none overflow-hidden rounded-lg border"
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); swipeTo(e) }}
+            onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) swipeTo(e) }}
+          >
+            <div className={cn("pointer-events-none absolute inset-0 [&>div]:h-full!", old)}><Thumb file={file} size="lg" /></div>
+            <div className="pointer-events-none absolute inset-0 [&>div]:h-full!" style={{ clipPath: `inset(0 0 0 ${x}%)` }}><Thumb file={file} size="lg" /></div>
+            <div
+              role="slider" tabIndex={0} aria-label="Divider between versions" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(x)}
+              onKeyDown={(e) => { const d = e.key === "ArrowLeft" ? -2 : e.key === "ArrowRight" ? 2 : 0; if (d) { e.preventDefault(); setX((v) => Math.min(100, Math.max(0, v + d))) } }}
+              className="group absolute inset-y-0 -ml-3 flex w-6 justify-center outline-none"
+              style={{ left: `${x}%` }}
+            >
+              <span className="h-full w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.25)]" />
+              <span className="absolute top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full border bg-white text-zinc-600 shadow-md group-focus-visible:ring-2 group-focus-visible:ring-sky-500"><ChevronsLeftRight className="size-4" /></span>
+            </div>
+            <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-1.5 text-[11px] text-white">{before}</span>
+            <span className="pointer-events-none absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[11px] text-white">{after}</span>
           </div>
-          <input type="range" min={0} max={100} value={x} onChange={(e) => setX(Number(e.target.value))} className="w-full" aria-label="Swipe between versions" />
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4">
