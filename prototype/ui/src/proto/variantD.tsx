@@ -447,6 +447,11 @@ function StagingTab() {
   const staged = changed.filter((f) => f.staged)
   const unstaged = changed.filter((f) => !f.staged)
   const blocked = changed.some((f) => f.lock && f.lock.by !== "you")
+  const ticked = changed.filter((f) => f.ticked).length
+  const toCommit = dev ? staged.length : ticked
+  const needMsg = !msg.trim()
+  // Artist Mode with nothing ticked but local Commits waiting: the button becomes Push and the message box isn't used.
+  const pushOnly = !dev && !ticked && p.unpushed > 0
   const selectedFile = p.files.find((f) => f.path === selected)
   const Section = ({ title, files, action }: { title: string; files: FileEntry[]; action?: React.ReactNode }) => (
     <section className="rounded-lg border">
@@ -483,12 +488,29 @@ function StagingTab() {
           )}
         </div>
         <div className="space-y-2 border-t pt-3">
-          <Textarea value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={dev ? "Commit message" : "What did you change?"} className={cn("min-h-16 resize-none", dev && "font-mono text-xs")} />
+          <Textarea
+            value={msg}
+            onChange={(e) => setMsg(e.target.value)}
+            disabled={pushOnly}
+            placeholder={pushOnly ? `Nothing ticked: Push sends your ${p.unpushed === 1 ? "Commit with its own message" : `${p.unpushed} Commits with their own messages`}` : dev ? "Commit message (required)" : "What did you change? (required)"}
+            className={cn("min-h-16 resize-none", dev && "font-mono text-xs")}
+          />
           <div className="flex items-center gap-2">
-            {p.unpushed > 0 && <span className="text-xs text-zinc-500">{p.unpushed} local commit{p.unpushed > 1 ? "s" : ""} not pushed</span>}
+            {p.unpushed > 0 && <span className="text-xs text-zinc-500">{p.unpushed} local Commit{p.unpushed > 1 ? "s" : ""} not pushed · locks kept until you push</span>}
             <div className="ml-auto flex gap-2">
-              <Button variant={dev ? "default" : "outline"} onClick={() => { p.commit(msg); setMsg("") }}>{dev ? `Commit (${staged.length})` : "Commit"}</Button>
-              {!dev && <Button disabled={blocked} onClick={() => { p.commitAndPush(msg); setMsg("") }}>Commit &amp; Push ({changed.filter((f) => f.ticked).length})</Button>}
+              <Button
+                variant={dev ? "default" : "outline"}
+                disabled={!toCommit || needMsg}
+                title={!toCommit ? (dev ? "Stage files first" : "Tick files first") : needMsg ? "Write a commit message first" : "Record a Commit on this computer only"}
+                onClick={() => { p.commit(msg); setMsg("") }}
+              >{dev ? `Commit (${staged.length})` : "Commit"}</Button>
+              {!dev && (
+                <Button
+                  disabled={blocked || (ticked ? needMsg : !p.unpushed)}
+                  title={blocked ? "Someone else holds a lock on one of these files" : ticked && needMsg ? "Write a commit message first" : undefined}
+                  onClick={() => { p.commitAndPush(msg); setMsg("") }}
+                >{ticked ? `Commit & Push (${ticked} file${ticked === 1 ? "" : "s"})` : p.unpushed ? `Push (${p.unpushed} commit${p.unpushed === 1 ? "" : "s"})` : "Commit & Push"}</Button>
+              )}
             </div>
           </div>
         </div>
@@ -1777,8 +1799,8 @@ function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenCh
           <CommandItem onSelect={() => run(() => p.scan("scan"))}><RefreshCw /> Scan for changes<CommandShortcut>F5</CommandShortcut></CommandItem>
           <CommandItem onSelect={() => run(() => onTab("staging"))}><GitCommitHorizontal /> Commit…</CommandItem>
           {dev
-            ? <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Push</CommandItem>
-            : <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Commit &amp; Push</CommandItem>}
+            ? <CommandItem onSelect={() => run(p.push)}><ArrowUpFromLine /> Push</CommandItem>
+            : <CommandItem onSelect={() => run(() => onTab("staging"))}><ArrowUpFromLine /> Commit &amp; Push…</CommandItem>}
           <CommandItem onSelect={() => run(() => runCommand("new-branch"))}><GitBranchPlus /> New branch…</CommandItem>
           <CommandItem onSelect={() => run(() => p.openFlow({ kind: "locks" }))}><Users /> Who's editing what…</CommandItem>
           <CommandItem onSelect={() => run(p.releaseAllMine)}><LockOpen /> Release all my locks</CommandItem>
@@ -1869,7 +1891,7 @@ export function VariantD() {
                 <kbd className="rounded border bg-zinc-50 px-1 font-sans text-[10px] font-medium text-zinc-500">{MOD} K</kbd>
               </Button>
               <SyncButton />
-              {dev && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => p.commitAndPush("")}><ArrowUpFromLine className="size-4" /> Push{p.unpushed ? ` ↑${p.unpushed}` : ""}</Button>}
+              {dev && <Button size="sm" variant="outline" className="gap-1.5" title="Push your local Commits and release the Locks on the files they changed" onClick={p.push}><ArrowUpFromLine className="size-4" /> Push{p.unpushed ? ` ↑${p.unpushed}` : ""}</Button>}
             </div>
           </div>
           <TabsContent value="staging" className="min-h-0 flex-1"><StagingTab /></TabsContent>

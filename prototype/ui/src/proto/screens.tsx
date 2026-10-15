@@ -305,7 +305,7 @@ export function ConflictScreen() {
             {dev && lastCmd && <code className="min-w-0 truncate text-[11px] text-zinc-500">$ {lastCmd}</code>}
             <div className="ml-auto flex gap-2">
               {left === 0 ? (
-                <Button onClick={() => p.finishConflict(resolved)}>{merge ? (ctx.noCommit ? "Finish merge" : "Finish and commit merge") : ctx.origin === "sync" ? "Finish sync" : "Done"}</Button>
+                <Button onClick={() => p.finishConflict(resolved)}>{merge ? (ctx.noCommit ? "Finish merge" : "Finish and commit merge") : ctx.push ? "Finish and push" : ctx.origin === "sync" ? "Finish sync" : "Done"}</Button>
               ) : (
                 <>
                   {!resolved[c.file.path] && <Button variant="ghost" onClick={() => resolve("manual")} title="You combined both versions yourself, in your editor">I merged it by hand</Button>}

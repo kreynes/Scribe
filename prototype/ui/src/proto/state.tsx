@@ -23,7 +23,10 @@ export type Revision = {
   author: string
   when: string
   files: number
+  /** Not pushed yet: a local Commit. */
   local?: boolean
+  /** Files a local Commit changed, so pushing it can release their Locks. */
+  paths?: string[]
 }
 
 export type Teammate = { name: string; initials: string; editing: string[]; online: boolean }
@@ -111,7 +114,7 @@ export type Flow =
 
 export type Resolution = "mine" | "theirs" | "manual"
 /** What sent the user to the conflict screen. "demo" = the prototype switcher. */
-export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string }
+export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string; push?: { sent: string[]; commits: number } }
 
 export type SyncOpts = { target?: string; reset?: boolean }
 export type SwitchOpts = { revision?: string; reset?: boolean; local?: boolean }
@@ -138,6 +141,7 @@ type Proto = {
   merge: (branch: string, into: boolean, opts: { message: string; noCommit: boolean; conflicts: string[] }) => void
   commit: (msg: string) => void
   commitAndPush: (msg: string) => void
+  push: () => void
   toggleTick: (path: string) => void
   toggleStage: (path: string) => void
   toggleLock: (path: string) => void
@@ -148,6 +152,11 @@ type Proto = {
 
 const Ctx = createContext<Proto | null>(null)
 export const useProto = () => useContext(Ctx)!
+
+let seq = 0
+const newId = () => ((0x5e1f0000 + (Date.now() % 0xffff) * 977 + ++seq * 2654435761) >>> 0).toString(16).padStart(8, "0")
+const localRev = (message: string, paths: string[], count = paths.length): Revision => ({ id: newId(), message, author: "You", when: "just now", files: Math.max(1, count), local: true, paths })
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 function readParam<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   const v = new URLSearchParams(location.search).get(key) as T | null
@@ -166,7 +175,8 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
   const [branch, setBranch] = useState("main")
   const [files, setFiles] = useState(INITIAL_FILES)
   const [historyList, setHistory] = useState(INITIAL_HISTORY)
-  const [unpushed, setUnpushed] = useState(0)
+  // Local Commits left behind on other branches, restored when switching back.
+  const [parked, setParked] = useState<Record<string, Revision[]>>({})
   const [lockWarning, setLockWarning] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
   const [operation, setOperation] = useState<{ label: string; pct: number } | null>(null)
@@ -201,6 +211,34 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     return t ? [...list, fn(t)] : list
   }
 
+  const locals = historyList.filter((r) => r.local)
+
+  /** Commit & Push / Push: commit the ticked files (if any), sync, push every local Commit, release the pushed files' Locks. */
+  const send = (picked: FileEntry[], msg: string) => {
+    const sent = [...new Set([...locals.flatMap((r) => r.paths ?? []), ...picked.map((f) => f.path)])]
+    const commits = locals.length + (picked.length ? 1 : 0)
+    const fresh = picked.length ? localRev(msg, picked.map((f) => f.path)) : null
+    run(picked.length ? "Commit & Push" : "Push", () => {
+      const fs = files.map((f) => (picked.includes(f) ? { ...f, change: null, staged: false, ticked: false } : f))
+      if (fresh) setHistory((h) => [fresh, ...h])
+      // The sync step: the server moved and touches files we're sending, so Lore merges locally first.
+      const clash = incoming ? incoming.paths.filter((x) => sent.includes(x)) : []
+      if (clash.length) { setFiles(fs); value.startConflict({ origin: "sync", paths: clash, push: { sent, commits } }); return }
+      finishPush(fs, sent, commits)
+    })
+  }
+
+  const finishPush = (start: FileEntry[], sent: string[], commits: number, resetPaths: string[] = []) => {
+    let fs = start
+    const released = allFiles(fs).filter((f) => sent.includes(f.path) && f.lock?.by === "you")
+    for (const f of released) fs = upsert(fs, f.path, (g) => ({ ...g, lock: null }))
+    setFiles(fs)
+    if (incoming) applyIncoming(resetPaths, "")
+    setHistory((h) => h.map((r) => (r.local ? { ...r, local: false } : r)))
+    const cmd = mode === "developer" && released.length ? ` · lore lock release ${released.map((f) => fileName(f.path)).join(" ")}` : ""
+    setToast(`Pushed ${plural(commits, "commit")} to ${branch}` + (released.length ? `. Released ${plural(released.length, "lock")}` : "") + cmd)
+  }
+
   const applyIncoming = (resetPaths: string[], label: string) => {
     if (!incoming) return
     setHistory((h) => {
@@ -219,7 +257,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     branch, setBranch,
     files, setFiles,
     history: historyList,
-    unpushed,
+    unpushed: locals.length,
     lockWarning, setLockWarning,
     sessionExpired, setSessionExpired,
     operation,
@@ -232,12 +270,12 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       setScreenS("main"); writeParam("screen", "main")
       if (conflict.origin === "sync") {
         const theirs = Object.entries(r).filter(([, v]) => v === "theirs").map(([k]) => k)
-        applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
+        if (conflict.push) finishPush(files, conflict.push.sent, conflict.push.commits, theirs)
+        else applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
       } else if (conflict.origin === "merge") {
         if (conflict.noCommit) setToast(`Merge resolved. Nothing is committed yet: review it in Staging, then commit`)
         else {
-          setHistory((h) => [{ id: "local", message: conflict.message || `Merge ${conflict.source} into ${branch}`, author: "You", when: "just now", files: n, local: true }, ...h.filter((r) => !r.local)])
-          setUnpushed((u) => u + 1)
+          setHistory((h) => [localRev(conflict.message || `Merge ${conflict.source} into ${branch}`, [], n), ...h])
           setToast(`Merged ${conflict.source} into ${branch} (not pushed yet)`)
         }
       } else setToast(`Resolved ${n} conflicts`)
@@ -245,7 +283,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     },
     leaveConflict: (aborted) => {
       setScreenS("main"); writeParam("screen", "main")
-      setToast(aborted ? "Merge aborted. Your files are back to how they were before it started" : "Left for later. Sync again when you're ready to decide")
+      setToast(aborted ? "Merge aborted. Your files are back to how they were before it started" : conflict.push ? "Nothing was pushed. Your Commits are still local; Commit & Push again when you're ready" : "Left for later. Sync again when you're ready to decide")
       setConflict({ origin: "demo" })
     },
     incoming,
@@ -286,11 +324,12 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       setFlow(null)
       run("Switch", () => {
         if (opts.reset) setFiles(files.map((f) => ({ ...f, change: null, staged: false, ticked: false })))
-        const left = unpushed
+        const left = locals.length
+        setParked((pk) => ({ ...pk, [branch]: locals }))
+        setHistory((h) => [...(parked[b] ?? []), ...h.filter((r) => !r.local)])
         setBranch(b)
-        setUnpushed(0)
         const at = opts.revision && opts.revision !== "latest" ? ` at ${opts.revision}` : ""
-        setToast(`Switched to ${b}${at}` + (left ? `. Your ${left} unpushed commit${left === 1 ? " stays" : "s stay"} on ${branch}` : "") + (opts.reset ? ". Local changes discarded" : ""))
+        setToast(`Switched to ${b}${at}` + (left ? `. Your ${plural(left, "unpushed Commit")} ${left === 1 ? "stays" : "stay"} on ${branch}` : "") + (opts.reset ? ". Local changes discarded" : ""))
       })
     },
     merge: (source, into, { message, noCommit, conflicts }) => {
@@ -299,33 +338,32 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       if (conflicts.length) return run("Merge", () => value.startConflict({ origin: "merge", source, paths: conflicts, noCommit, message }))
       run("Merge", () => {
         if (noCommit) return setToast(`Merged ${source} into your working copy. Review it in Staging, then commit`)
-        setHistory((h) => [{ id: "local", message: message || `Merge ${source} into ${branch}`, author: "You", when: "just now", files: 6, local: true }, ...h.filter((r) => !r.local)])
-        setUnpushed((u) => u + 1)
+        setHistory((h) => [localRev(message || `Merge ${source} into ${branch}`, [], 6), ...h])
         setToast(`Merged ${source} into ${branch} with no conflicts (not pushed yet)`)
       })
     },
     commit: (msg) => {
       const picked = files.filter((f) => (mode === "developer" ? f.staged : f.ticked) && f.change)
       if (!picked.length) return setToast("Nothing selected to commit")
+      if (!msg.trim()) return setToast("Write a commit message first")
       run("Commit", () => {
-        setUnpushed((n) => n + 1)
-        setHistory((h) => [{ id: "local", message: msg || "Work in progress", author: "You", when: "just now", files: picked.length, local: true }, ...h.filter((r) => !r.local)])
+        setHistory((h) => [localRev(msg.trim(), picked.map((f) => f.path)), ...h])
         setFiles(files.map((f) => (picked.includes(f) ? { ...f, change: null, staged: false, ticked: false } : f)))
         setToast("Committed locally (not pushed yet)")
       })
     },
     commitAndPush: (msg) => {
       const picked = files.filter((f) => f.ticked && f.change)
-      if (!picked.length && !unpushed) return setToast("Nothing to push")
-      run("Commit & Push", () => {
-        setHistory((h) => [{ id: "a7d41e93", message: msg || "Update", author: "You", when: "just now", files: picked.length || 1 }, ...h.filter((r) => !r.local)])
-        setFiles(files.map((f) => (picked.includes(f) ? { ...f, change: null, ticked: false, staged: false, lock: f.lock?.by === "you" ? null : f.lock } : f)))
-        setUnpushed(0)
-        setToast("Pushed. Locks on pushed files were released")
-      })
+      if (!picked.length && !locals.length) return setToast("Nothing to send")
+      if (picked.length && !msg.trim()) return setToast("Write a commit message first")
+      send(picked, msg.trim())
     },
-    toggleTick: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, ticked: !f.ticked } : f))),
-    toggleStage: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, staged: !f.staged } : f))),
+    push: () => {
+      if (!locals.length) return setToast("Nothing to push. Commit something first")
+      send([], "")
+    },
+    toggleTick: (p) => setFiles((fs) => fs.map((f) => (f.path === p ? { ...f, ticked: !f.ticked } : f))),
+    toggleStage: (p) => setFiles((fs) => fs.map((f) => (f.path === p ? { ...f, staged: !f.staged } : f))),
     toggleLock: (p) => setFiles(upsert(files, p, (f) => ({ ...f, lock: f.lock ? null : { by: "you", branch } }))),
     releaseLock: (p) => {
       const who = allFiles(files).find((f) => f.path === p)?.lock?.by
