@@ -182,7 +182,9 @@ export function ConflictScreen() {
   const multiple = list.length > 1
   const merge = ctx.origin === "merge"
   // Lore's sub-commands for each action. Sync conflicts are assumed to use the merge machinery too (a guess).
-  const cmd = (verb: string) => `lore branch merge ${verb} ${c.file.path}`
+  // In a merge started by Sync, Lore's `mine` is the remote tip (live check, #24), so Scribe's "Keep mine" runs `resolve theirs`.
+  const swap = ctx.origin === "sync"
+  const cmd = (verb: string) => `lore branch merge ${swap ? verb.replace(/\b(mine|theirs)\b/, (m) => (m === "mine" ? "theirs" : "mine")) : verb} ${c.file.path}`
 
   const resolve = (r: Resolution) => {
     const next = { ...resolved, [c.file.path]: r }
@@ -210,7 +212,7 @@ export function ConflictScreen() {
       : dev ? `Conflict: ${list.length} files need resolution` : `${list.length} files were changed by you and someone else`
   const sub = merge
     ? dev ? `lore branch merge start ${ctx.source}${ctx.noCommit ? " --no-commit" : ""} reported ${list.length} conflict${list.length === 1 ? "" : "s"} · resolve each, then the merge commits` : `Pick which version to keep for each file. The merge finishes when every file is decided.`
-    : dev ? `revision.sync reported file_conflict=${list.length} · strategy: resolve file by file (Settings → Conflict resolution strategy)` : "Pick which version to keep for each file. Nothing is lost: both versions stay in history."
+    : dev ? `lore sync merged ${INCOMING.id} into your local Commit and flagged ${list.length} conflict${list.length === 1 ? "" : "s"} · here Lore's "mine" is the server's side, so Keep mine runs resolve theirs` : "Pick which version to keep for each file. Nothing is lost: both versions stay in history."
 
   return (
     <div className="flex h-full flex-col">

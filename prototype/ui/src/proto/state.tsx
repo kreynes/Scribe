@@ -126,10 +126,11 @@ export type Flow =
 
 export type Resolution = "mine" | "theirs" | "manual"
 /** What sent the user to the conflict screen. "demo" = the prototype switcher. */
-export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string; push?: { sent: string[]; commits: number } }
+export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string; push?: { sent: string[]; commits: number }; merged?: boolean }
 
 export type SyncOpts = { target?: string; reset?: boolean }
-export type SwitchOpts = { revision?: string; reset?: boolean; local?: boolean }
+export type SwitchOpts = { revision?: string; reset?: boolean; local?: boolean; force?: boolean; copy?: boolean }
+export type ClashChoice = "merge" | "reset" | "forward" | "branch"
 
 type Proto = {
   mode: Mode; setMode: (m: Mode) => void
@@ -150,6 +151,8 @@ type Proto = {
   sync: (opts?: SyncOpts) => void
   requestSwitch: (b: string) => void
   switchBranch: (b: string, opts?: SwitchOpts) => void
+  switchCommitFirst: (b: string, message: string) => void
+  syncClash: (choice: ClashChoice, o: { paths: string[]; message: string; copy: boolean; branchName: string }) => void
   merge: (branch: string, into: boolean, opts: { message: string; noCommit: boolean; conflicts: string[] }) => void
   commit: (msg: string) => void
   commitAndPush: (msg: string) => void
@@ -294,7 +297,13 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       if (conflict.origin === "sync") {
         const theirs = Object.entries(r).filter(([, v]) => v === "theirs").map(([k]) => k)
         if (conflict.push) finishPush(files, conflict.push.sent, conflict.push.commits, theirs)
-        else applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
+        else {
+          applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
+          if (conflict.merged) {
+            setHistory((h) => [localRev(`Merge ${INCOMING.id} from the server`, [], n), ...h])
+            setToast(`Sync finished: ${plural(n, "file")} merged in a local Commit. Push to share it`)
+          }
+        }
       } else if (conflict.origin === "merge") {
         if (conflict.noCommit) setToast(`Merge resolved. Nothing is committed yet: review it in Staging, then commit`)
         else {
@@ -347,12 +356,48 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       setFlow(null)
       run("Switch", () => {
         if (opts.reset) setFiles(files.map((f) => ({ ...f, change: null, staged: false, ticked: false })))
+        const kept = opts.force ? files.filter((f) => f.change).length : 0
         const left = locals.length
         setParked((pk) => ({ ...pk, [branch]: locals }))
         setHistory((h) => [...(parked[b] ?? []), ...h.filter((r) => !r.local)])
         setBranch(b)
         const at = opts.revision && opts.revision !== "latest" ? ` at ${opts.revision}` : ""
-        setToast(`Switched to ${b}${at}` + (left ? `. Your ${plural(left, "unpushed Commit")} ${left === 1 ? "stays" : "stay"} on ${branch}` : "") + (opts.reset ? ". Local changes discarded" : ""))
+        setToast(`Switched to ${b}${at}` + (left ? `. Your ${plural(left, "unpushed Commit")} ${left === 1 ? "stays" : "stay"} on ${branch}` : "") + (opts.reset ? `. Local changes discarded${opts.copy ? " (copies saved as .mine files)" : ""}` : "") + (kept ? `. Your ${plural(kept, "edited file")} stayed as local changes` : ""))
+      })
+    },
+    switchCommitFirst: (b, message) => {
+      setFlow(null)
+      const changedNow = files.filter((f) => f.change)
+      const rev = localRev(message, changedNow.map((f) => f.path))
+      run("Commit and switch", () => {
+        setParked((pk) => ({ ...pk, [branch]: [rev, ...locals] }))
+        setHistory((h) => [...(parked[b] ?? []), ...h.filter((r) => !r.local)])
+        setFiles(files.map((f) => (f.change ? { ...f, change: null, staged: false, ticked: false } : f)))
+        setBranch(b)
+        setToast(`Committed ${plural(changedNow.length, "file")} on ${branch}, then switched to ${b}`)
+      })
+    },
+    syncClash: (choice, o) => {
+      setFlow(null)
+      const n = o.paths.length
+      if (choice === "reset") return run("Sync", () => applyIncoming(o.paths, `Synced. ${plural(n, "file")} now match the server${o.copy ? "; your versions were saved as .mine copies" : ""}`))
+      if (choice === "forward") return run("Sync", () => applyIncoming([], `Synced everything except ${plural(n, "file")} you kept. Pushing ${n === 1 ? "it" : "them"} later replaces the server's version`))
+      const rev = localRev(o.message, o.paths)
+      const clean = files.map((f) => (o.paths.includes(f.path) ? { ...f, change: null, staged: false, ticked: false } : f))
+      if (choice === "branch") {
+        return run("Move to branch", () => {
+          setBranches((bs) => [...bs, o.branchName])
+          setParked((pk) => ({ ...pk, [branch]: locals }))
+          setHistory((h) => [rev, ...h.filter((r) => !r.local)])
+          setFiles(clean)
+          setBranch(o.branchName)
+          setToast(`Your edits are committed on ${o.branchName}. Switch back to ${branch} and Sync when you're ready`)
+        })
+      }
+      run("Commit", () => {
+        setHistory((h) => [rev, ...h])
+        setFiles(clean)
+        run("Sync", () => value.startConflict({ origin: "sync", paths: o.paths, merged: true }))
       })
     },
     merge: (source, into, { message, noCommit, conflicts }) => {

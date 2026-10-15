@@ -616,27 +616,72 @@ function SyncDialog({ flow }: { flow: Extract<Flow, { kind: "sync" }> }) {
   )
 }
 
+/** Lore refuses the whole Sync with `LocalModifications` (error 44) and names no files in the error; the paths come
+ *  from its error-level log events ("File has local changes: …"). This dialog is what Scribe shows instead. */
 function SyncConflictDialog({ flow }: { flow: Extract<Flow, { kind: "sync-conflict" }> }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const n = flow.paths.length
+  const [choice, setChoice] = useState<"merge" | "reset" | "forward" | "branch">("merge")
+  const [message, setMessage] = useState("")
+  const [copy, setCopy] = useState(true)
+  const [branchName, setBranchName] = useState(`${p.branch === "main" ? "art" : p.branch.split("/")[0]}/my-${fileName(flow.paths[0]).replace(/\..+$/, "").replace(/_/g, "-")}`)
+  const needsMsg = choice === "merge" || choice === "branch"
+  const nameTaken = p.branches.includes(branchName.trim())
+  const ok = (!needsMsg || message.trim()) && (choice !== "branch" || (branchName.trim() && !nameTaken))
+  const radio = "flex items-start gap-2 rounded-md border p-2.5 font-normal has-[[data-state=checked]]:border-zinc-900"
+  const cli = {
+    merge: [`lore commit ${q(message.trim() || "<message>")} ${flow.paths.map(q).join(" ")}`, "lore sync   # merges; conflicts are resolved file by file"],
+    reset: [...(copy ? flow.paths.map((x) => `copy ${q(x)} → ${q(x.replace(/(\.[^.]+)$/, ".mine$1"))}`) : []), "lore sync --reset"],
+    forward: ["lore sync --forward-changes"],
+    branch: [`lore branch create ${branchName.trim() || "<name>"}`, `lore commit ${q(message.trim() || "<message>")} ${flow.paths.map(q).join(" ")}`],
+  }[choice]
   return (
     <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><CircleAlert className="size-5 text-amber-600" /> {n} file{n === 1 ? "" : "s"} changed on both sides</DialogTitle>
-          <DialogDescription>{INCOMING.author} pushed “{INCOMING.message}”, which changes {n === 1 ? "a file" : "files"} you're also working on. The rest of the sync is ready.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2"><CircleAlert className="size-5 text-amber-600" /> Sync stopped: {n} file{n === 1 ? "" : "s"} changed on both sides</DialogTitle>
+          <DialogDescription>{INCOMING.author} pushed “{INCOMING.message}”, which changes {n === 1 ? "a file" : "files"} you haven't committed yet. Nothing on your computer has changed. How do you want to continue?</DialogDescription>
         </DialogHeader>
-        <ul className="space-y-1 rounded-md border p-2 text-sm">
-          {flow.paths.map((x) => <li key={x} className="flex items-center gap-2"><FileTypeIcon path={x} />{dev ? <code className="text-xs">{x}</code> : fileName(x)}</li>)}
+        <ul className="space-y-1 rounded-md border bg-zinc-50 p-2 text-sm">
+          {flow.paths.map((x) => (
+            <li key={x} className="flex items-center gap-2">
+              <FileTypeIcon path={x} />{dev ? <code className="text-xs">{x}</code> : fileName(x)}
+              <button className="ml-auto text-xs text-zinc-500 underline hover:text-zinc-900" onClick={() => p.openFlow({ kind: "diff", paths: [x], conflict: true })}>Compare</button>
+            </li>
+          ))}
         </ul>
-        {dev && <p className="text-[11px] text-zinc-500">Guess: Lore reports these as sync conflicts and resolves them with the same mine/theirs machinery as a merge.</p>}
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" onClick={() => { p.closeFlow(); p.say("Left for later. Sync again when you're ready") }}>Later</Button>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => { p.closeFlow(); p.sync({ reset: true }) }}>Overwrite mine</Button>
-            <Button onClick={() => p.startConflict({ origin: "sync", paths: flow.paths })}>Decide file by file</Button>
+        <RadioGroup value={choice} onValueChange={(v) => setChoice(v as typeof choice)} className="space-y-1.5 text-sm">
+          <Label className={radio}><RadioGroupItem value="merge" className="mt-0.5" /><span>Decide file by file<span className="block text-xs text-zinc-500">Scribe commits your edits as a local Commit, syncs, and you pick your version or theirs for each file.</span></span></Label>
+          <Label className={radio}><RadioGroupItem value="reset" className="mt-0.5" /><span>Use the server's versions<span className="block text-xs text-red-600">Your uncommitted edits to {n === 1 ? "this file" : "these files"} are replaced.</span></span></Label>
+          <Label className={radio}><RadioGroupItem value="forward" className="mt-0.5" /><span>Keep mine for now, sync everything else<span className="block text-xs text-amber-700">{n === 1 ? "This file stays" : "These files stay"} as your local changes. If you push them later, your version replaces {INCOMING.author}'s without a merge.</span></span></Label>
+          <Label className={radio}><RadioGroupItem value="branch" className="mt-0.5" /><span>Move my edits to a new branch<span className="block text-xs text-zinc-500">Your edits are committed on a new branch, out of {INCOMING.author}'s way. Merge it back later.</span></span></Label>
+        </RadioGroup>
+        {choice === "reset" && <Label className="text-sm font-normal"><Checkbox checked={copy} onCheckedChange={(v) => setCopy(v === true)} /> Save a copy of mine first (as <code className="text-xs">.mine</code> files next to the originals)</Label>}
+        {choice === "branch" && (
+          <div className="space-y-1">
+            <Label htmlFor="clash-branch" className="text-xs">New branch</Label>
+            <Input id="clash-branch" value={branchName} onChange={(e) => setBranchName(e.target.value)} className={cn("h-8 font-mono text-xs", nameTaken && "border-red-400")} />
+            {nameTaken && <p className="text-xs text-red-600">A branch with this name already exists.</p>}
           </div>
+        )}
+        {needsMsg && (
+          <div className="space-y-1">
+            <Label htmlFor="clash-msg" className="text-xs">Commit message (required)</Label>
+            <Input id="clash-msg" autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What did you change?" className={cn("h-8 text-sm", dev && "font-mono text-xs")} />
+          </div>
+        )}
+        {dev && (
+          <div className="space-y-1">
+            <code className="block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600">{cli.map((c) => <span key={c} className="block">$ {c}</span>)}</code>
+            <p className="text-[11px] text-zinc-500">Lore stopped with error 44 (LocalModifications). The error names no files; Scribe reads them from Lore's log events.</p>
+          </div>
+        )}
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="ghost" onClick={() => { p.closeFlow(); p.say("Sync cancelled. Nothing changed") }}>Cancel</Button>
+          <Button disabled={!ok} variant={choice === "reset" ? "destructive" : "default"} onClick={() => p.syncClash(choice, { paths: flow.paths, message: message.trim(), copy, branchName: branchName.trim() })}>
+            {{ merge: "Commit and sync", reset: "Replace mine and sync", forward: "Sync the rest", branch: "Move to branch" }[choice]}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -645,18 +690,29 @@ function SyncConflictDialog({ flow }: { flow: Extract<Flow, { kind: "sync-confli
 
 // ---------------------------------------------------------------- Switch
 
+/** Mock preflight (`lore branch switch --dry-run`): which of your edited files the target branch has different. */
+export function switchClash(files: FileEntry[], target: string) {
+  return files.filter((f) => f.change && hash(f.path + ">" + target) % 3 !== 0).map((f) => f.path)
+}
+
 function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const [revMode, setRevMode] = useState(flow.revision ? "revision" : "latest")
   const [revision, setRevision] = useState(flow.revision ?? "")
-  const [changes, setChanges] = useState("keep")
+  const changedFiles = p.files.filter((f) => f.change)
+  const changed = changedFiles.length
+  const clash = switchClash(p.files, flow.branch)
+  const [changes, setChanges] = useState<"keep" | "commit" | "reset" | "force">(clash.length ? "commit" : "keep")
+  const [message, setMessage] = useState("")
+  const [copy, setCopy] = useState(true)
   const [local, setLocal] = useState(false)
   const [preview, setPreview] = useState(false)
-  const changed = p.files.filter((f) => f.change).length
   const rev = revMode === "latest" ? "latest" : revision.trim()
-  const flags = [rev !== "latest" && q(rev), changes === "reset" && "--reset", local && "--local"].filter(Boolean).join(" ")
+  const flags = [rev !== "latest" && q(rev), changes === "reset" && "--reset", changes === "force" && "--force", local && "--local"].filter(Boolean).join(" ")
   const radio = "flex items-start gap-2 font-normal"
+  const ok = !!rev && (changes !== "commit" || !!message.trim())
+  const label = { keep: "Switch", commit: "Commit and switch", reset: "Discard and switch", force: "Switch anyway" }[changes]
   return (
     <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-auto sm:max-w-md">
@@ -668,12 +724,21 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
           {changed > 0 && (
             <section className="space-y-1.5">
               <div className="font-medium">Your changes</div>
-              <RadioGroup value={changes} onValueChange={setChanges} className="space-y-1.5">
-                <Label className={radio}><RadioGroupItem value="keep" className="mt-0.5" /> <span>Keep them<span className="block text-xs text-zinc-500">Works only if {flow.branch} doesn't change those files. Otherwise Lore stops and nothing changes.</span></span></Label>
+              {clash.length > 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                  <div className="mb-1 flex items-center gap-1.5 font-medium"><TriangleAlert className="size-3.5" /> {clash.length} of them {clash.length === 1 ? "is" : "are"} different on {flow.branch}</div>
+                  <ul className="space-y-0.5">{clash.map((x) => <li key={x} className="flex items-center gap-1.5"><FileTypeIcon path={x} />{dev ? <code>{x}</code> : fileName(x)}</li>)}</ul>
+                  <div className="mt-1">Lore won't switch while you have uncommitted edits to {clash.length === 1 ? "it" : "them"}.</div>
+                </div>
+              ) : <p className="text-xs text-zinc-500">None of them differ on {flow.branch}, so they can come along.</p>}
+              <RadioGroup value={changes} onValueChange={(v) => setChanges(v as typeof changes)} className="space-y-1.5">
+                {clash.length === 0 && <Label className={radio}><RadioGroupItem value="keep" className="mt-0.5" /> <span>Bring them with me<span className="block text-xs text-zinc-500">They stay uncommitted on {flow.branch}</span></span></Label>}
+                <Label className={radio}><RadioGroupItem value="commit" className="mt-0.5" /> <span>Commit them here first<span className="block text-xs text-zinc-500">A local Commit on {p.branch}, then the switch. Nothing is pushed.</span></span></Label>
+                {changes === "commit" && <Input autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message (required)" className={cn("ml-6 h-8 w-[calc(100%-1.5rem)] text-sm", dev && "font-mono text-xs")} />}
                 <Label className={radio}><RadioGroupItem value="reset" className="mt-0.5" /> <span>Discard them<span className="block text-xs text-red-600">Files go back to how they are on {flow.branch}</span></span></Label>
+                {changes === "reset" && <Label className="ml-6 text-xs font-normal"><Checkbox checked={copy} onCheckedChange={(v) => setCopy(v === true)} /> Save a copy of mine first</Label>}
+                {dev && clash.length > 0 && <Label className={radio}><RadioGroupItem value="force" className="mt-0.5" /> <span>Bring them anyway<span className="block text-xs text-amber-700">Your versions stay as local changes on top of {flow.branch} (<code>--force</code>). Committing them later replaces {flow.branch}'s versions.</span></span></Label>}
               </RadioGroup>
-              <button className="text-xs text-zinc-500 underline" onClick={() => { p.closeFlow(); window.dispatchEvent(new CustomEvent("scribe:command", { detail: { type: "tab", value: "staging" } })) }}>Commit them first instead</button>
-              {dev && <p className="text-[11px] text-zinc-500">Without <code>--reset</code>, Lore refuses the whole switch with <code>LocalModifications</code> if the target changes an edited file, or if anything is staged. How Scribe shows that is still open.</p>}
             </section>
           )}
           <section className="space-y-1.5">
@@ -697,16 +762,19 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
           {preview && (
             <div className="rounded-md border bg-zinc-50 p-2 text-xs">
               <div className="mb-1 flex items-center gap-1.5 font-medium"><Eye className="size-3.5" /> Preview: nothing has changed yet</div>
-              About 23 files would change on disk.{changed > 0 && (changes === "reset" ? ` Your ${changed} changed files would be discarded.` : ` Your ${changed} changed files would come along.`)}
+              About 23 files would change on disk. {changes === "reset" ? `Your ${changed} changed files would be discarded.` : changes === "commit" ? `Your ${changed} changed files would be committed on ${p.branch} first.` : changes === "force" ? `Your ${clash.length} clashing files would stay as local changes.` : changed ? `Your ${changed} changed files would come along.` : ""}
             </div>
           )}
-          <Cli>lore branch switch {flow.branch}{flags ? " " + flags : ""}{preview ? " --dry-run" : ""}</Cli>
+          <code className={cn("block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600", !dev && "hidden")}>
+            {changes === "commit" && <span className="block">$ lore commit {q(message.trim() || "<message>")}</span>}
+            <span className="block">$ lore branch switch {flow.branch}{flags ? " " + flags : ""}{preview ? " --dry-run" : ""}</span>
+          </code>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" onClick={() => setPreview(true)}><Eye className="size-4" /> Preview</Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
-            <Button disabled={!rev} variant={changes === "reset" && changed ? "destructive" : "default"} onClick={() => p.switchBranch(flow.branch, { revision: rev, reset: changes === "reset", local })}>{changes === "reset" && changed ? "Discard and switch" : "Switch"}</Button>
+            <Button disabled={!ok} variant={changes === "reset" ? "destructive" : "default"} onClick={() => (changes === "commit" ? p.switchCommitFirst(flow.branch, message.trim()) : p.switchBranch(flow.branch, { revision: rev, reset: changes === "reset", force: changes === "force", local, copy: changes === "reset" && copy }))}>{label}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
