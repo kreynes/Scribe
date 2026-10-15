@@ -1,6 +1,6 @@
 // PROTOTYPE: building blocks used by Variant D. Throwaway code.
 import type { ReactNode } from "react"
-import { ArrowDownToLine, FileDiff, GitBranchPlus, GitMerge, Info, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDownToLine, FileDiff, GitBranchPlus, GitMerge, Info, Lock, LockOpen, Shield, ShieldOff, Star, TriangleAlert, X } from "lucide-react"
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { LORE_LOG, fileName, lockBranch, lockLabel, revisionDiff, useProto, type FileEntry, type Revision } from "./state"
+import { LORE_LOG, fileName, lockBranch, lockLabel, revisionDiff, useProto, type ArchivedBranch, type FileEntry, type Revision } from "./state"
 
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
@@ -111,7 +111,39 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreat
         <ContextMenuSeparator />
         <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: false })}><GitMerge /> <Advanced>Merge into {p.branch}…</Advanced></ContextMenuItem>
         <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: true })}><GitMerge /> <Advanced>Merge {p.branch} into this…</Advanced></ContextMenuItem>
-        <ContextMenuItem variant="destructive" onClick={() => p.say("Delete (Advanced)")}><Advanced>Delete</Advanced></ContextMenuItem>
+        {(() => {
+          const prot = p.protectedBranches.includes(name)
+          const why = archiveBlocker(p, name)
+          return (
+            <>
+              <ContextMenuItem onClick={() => p.setProtected(name, !prot)}>{prot ? <ShieldOff /> : <Shield />} <Advanced>{prot ? "Unprotect" : "Protect from direct pushes"}</Advanced></ContextMenuItem>
+              <ContextMenuItem variant="destructive" disabled={!!why} title={why ?? undefined} onClick={() => p.openFlow({ kind: "archive-branch", branch: name })}><Archive /> <Advanced>{why ? `Archive (${why})` : "Archive…"}</Advanced></ContextMenuItem>
+            </>
+          )
+        })()}
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+/** Why Lore would refuse `branch archive` for this branch, or null. */
+export function archiveBlocker(p: ReturnType<typeof useProto>, name: string) {
+  if (name === p.branch) return "you're on it"
+  if (name === "main") return "default branch"
+  if (p.protectedBranches.includes(name)) return "protected"
+  return null
+}
+
+export function ArchivedBranchMenu({ branch, children }: { branch: ArchivedBranch; children: ReactNode }) {
+  const p = useProto()
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="w-60">
+        <ContextMenuLabel className="truncate">{branch.name}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => p.openFlow({ kind: "restore-branch", id: branch.id })}><ArchiveRestore /> Restore…</ContextMenuItem>
+        <ContextMenuItem onClick={() => p.say("Copied " + branch.id)}>Copy branch ID</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )

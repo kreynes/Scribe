@@ -1,5 +1,5 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (logo, project switcher, branches, account) and a tabbed centre: Staging, History, Explorer, Graph.
-import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpDown, ArrowUpFromLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsLeft, ChevronsRight, ChevronsUpDown, CommandIcon, Copy, Eye, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, GitMerge, HistoryIcon, Info, Lock, LockOpen, LogOut, Monitor, Moon, Palette, Plus, RefreshCw, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, TriangleAlert, UserRound, UserRoundPlus, Users, X } from "lucide-react"
+import { Archive, ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpDown, ArrowUpFromLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsLeft, ChevronsRight, ChevronsUpDown, CommandIcon, Copy, Eye, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, GitMerge, HistoryIcon, Info, Lock, LockOpen, LogOut, Monitor, Moon, Palette, Plus, RefreshCw, ScrollText, Search, Settings, Settings2, Shield, SlidersHorizontal, Star, Sun, TriangleAlert, Undo2, UserRound, UserRoundPlus, Users, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,8 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu } from "./shared"
-import { BRANCHES, PROJECT_TREE, changedFilesFor, fileName, lockBranch, revisionDiff, useProto, type FileEntry, type Mode } from "./state"
+import { ArchivedBranchMenu, BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu, archiveBlocker } from "./shared"
+import { BRANCHES, PROJECT_TREE, branchId, changedFilesFor, fileName, lockBranch, revisionDiff, useProto, type FileEntry, type Mode } from "./state"
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
@@ -73,7 +73,8 @@ function SidePanel() {
   const [search, setSearch] = useState("")
   const [favOnly, setFavOnly] = useState(false)
   const [favorites, setFavorites] = useState(() => new Set(["release/1.2"]))
-  const [branches, setBranches] = useState(BRANCHES)
+  const branches = p.branches
+  const [showArchived, setShowArchived] = useState(false)
   const [newFrom, setNewFrom] = useState<string | null>(null)
   const [infoFor, setInfoFor] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -181,6 +182,11 @@ function SidePanel() {
           className={cn("size-6", favOnly && "bg-amber-100")}
           onClick={() => setFavOnly(!favOnly)}
         ><Star className={cn("size-3.5", favOnly && "fill-amber-400 text-amber-500")} /></Button>
+        <Button
+          size="icon" variant="ghost" title={showArchived ? "Hide archived branches" : "Show archived branches"} aria-pressed={showArchived}
+          className={cn("size-6", showArchived && "bg-zinc-200")}
+          onClick={() => setShowArchived(!showArchived)}
+        ><Archive className="size-3.5" /></Button>
         <Button size="icon" variant="ghost" title="New branch" className="size-6" onClick={() => setNewFrom(p.branch)}><Plus className="size-3.5" /></Button>
       </div>
       <NewBranchDialog
@@ -188,10 +194,10 @@ function SidePanel() {
         branches={branches}
         onClose={() => setNewFrom(null)}
         onCreate={(name, base, switchNow) => {
-          setBranches((bs) => [...bs, name])
+          p.addBranch(name)
           setNewFrom(null)
           if (switchNow) { p.setBranch(name); p.say(`Created ${name} from ${base} and switched to it`) }
-          else p.say(`Created ${name} from ${base}`)
+          else p.say(`Created ${name} from ${base}. You're still on ${p.branch}`)
         }}
       />
       <BranchInfoDialog
@@ -222,6 +228,26 @@ function SidePanel() {
         {favs.length > 0 && rest.length > 0 && <li aria-hidden className="mx-2 my-1.5 border-t" />}
         {rest.map(row)}
         {!visible.length && <li className="px-2 py-3 text-xs text-zinc-400">{favOnly && !favorites.size ? "No favorites yet. Right-click a branch → Add to favorites." : "No branches match."}</li>}
+        {showArchived && (
+          <>
+            <li className="flex items-center gap-1 px-2 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-zinc-500"><Archive className="size-3" /> Archived ({p.archived.length})</li>
+            {p.archived.filter((a) => !q || a.name.toLowerCase().includes(q)).map((a) => (
+              <ArchivedBranchMenu key={a.id} branch={a}>
+                <li
+                  onDoubleClick={() => p.openFlow({ kind: "restore-branch", id: a.id })}
+                  title={`Archived by ${a.by}, ${a.when}. Double-click to restore`}
+                  className="flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-400 hover:bg-zinc-200/60"
+                >
+                  <GitBranch className="size-3.5 shrink-0" />
+                  <span className="truncate line-through decoration-zinc-300">{a.name}</span>
+                  <span className="ml-auto shrink-0 text-[10px]">{a.when}</span>
+                </li>
+              </ArchivedBranchMenu>
+            ))}
+            {!p.archived.length && <li className="px-2 py-1 text-xs text-zinc-400">Nothing archived.</li>}
+            {dev && <li className="px-2 pt-1 text-[10px] text-zinc-400"><code>lore branch list --archived</code></li>}
+          </>
+        )}
       </ul>
       <div className="flex flex-col gap-0.5 border-t p-2">
         <AccountMenu account={account} onSwitch={switchAccount} onOpenAccounts={() => setSettings("account")} />
@@ -275,60 +301,147 @@ function AccountMenu({ account, onSwitch, onOpenAccounts }: { account: Account; 
   )
 }
 
+/** Mock `lore branch latest list`: where this computer's copy of the branch has pointed, newest first. */
+function pointerHistory(b: string, p: ReturnType<typeof useProto>) {
+  const { own, head } = branchFacts(b)
+  const locals = b === p.branch ? p.history.filter((r) => r.local) : []
+  const pushed = (own.length ? own : [head]).slice(0, 6)
+  const top = 40 + pushed.length + locals.length
+  return [
+    ...locals.map((r, i) => ({ id: r.id, message: r.message, how: "Commit", when: "just now", n: top - i, local: true })),
+    ...pushed.map((cm, i) => ({ id: cm.id, message: cm.message, how: ["Sync", "Push", "Commit"][i % 3], when: formatWhen(cm.at, false), n: top - locals.length - i, local: false })),
+  ]
+}
+
+function MetadataTable({ branch }: { branch: string }) {
+  const p = useProto()
+  const rows = p.branchMeta[branch] ?? []
+  const [k, setK] = useState("")
+  const [v, setV] = useState("")
+  const add = () => { if (!k.trim()) return; p.setBranchMeta(branch, [...rows.filter(([x]) => x !== k.trim()), [k.trim(), v]]); setK(""); setV("") }
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="text-zinc-500">Key/value notes stored on the branch and shared with everyone, e.g. a release date or which checks it needs.</p>
+      <div className="rounded-md border">
+        {rows.map(([key, val]) => (
+          <div key={key} className="flex items-center gap-2 border-b px-2 py-1.5 last:border-b-0">
+            <code className="w-36 shrink-0 truncate">{key}</code>
+            <span className="min-w-0 flex-1 truncate">{val}</span>
+            <button aria-label={`Remove ${key}`} className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900" onClick={() => p.setBranchMeta(branch, rows.filter(([x]) => x !== key))}><X className="size-3.5" /></button>
+          </div>
+        ))}
+        {!rows.length && <div className="px-2 py-2 text-zinc-400">No metadata on this branch.</div>}
+      </div>
+      <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); add() }}>
+        <Input value={k} onChange={(e) => setK(e.target.value)} placeholder="key" className="h-7 w-36 font-mono text-xs" />
+        <Input value={v} onChange={(e) => setV(e.target.value)} placeholder="value" className="h-7 flex-1 text-xs" />
+        <Button type="submit" size="sm" variant="outline" className="h-7 text-xs" disabled={!k.trim()}>Add</Button>
+      </form>
+      {p.mode === "developer" && <code className="block text-[11px] text-zinc-400">$ lore branch metadata set {k.trim() || "<key>"} {v || "<value>"} --branch {branch}</code>}
+    </div>
+  )
+}
+
 /** Right-click a branch → Branch information… Facts come from the mock graph where the branch has commits there. */
 function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string | null; favorite: boolean; onClose: () => void; onSwitch: (b: string) => void }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const b = name ?? ""
-  const { own, head, isMain, baseCommit, behind, mergedInto, contributors, createdBy, createdAt, isProtected } = branchFacts(b)
+  const [tab, setTab] = useState("overview")
+  useEffect(() => { if (name) setTab("overview") }, [name])
+  const { own, head, isMain, baseCommit, behind, mergedInto, contributors, createdBy, createdAt } = branchFacts(b)
+  const isProtected = p.protectedBranches.includes(b)
+  const blocker = archiveBlocker(p, b)
+  const pointers = name ? pointerHistory(b, p) : []
+  const revisions = pointers.map((r) => ({ id: r.id, label: `#${r.n} ${r.message}${r.local ? " (not pushed)" : ""}` }))
+  const reset = (target?: string) => { onClose(); p.openFlow({ kind: "reset-branch", branch: b, revisions, target }) }
   const locks = b === p.branch ? p.files.concat(PROJECT_TREE).filter((f, i, a) => f.lock && a.findIndex((g) => g.path === f.path) === i).length : own.length ? (own.length * 3) % 5 : 0
   const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => <><dt className="text-zinc-500">{label}</dt><dd className="min-w-0">{children}</dd></>
+  const adv = !dev && <span className="ml-1 rounded border px-1 text-[9px] font-normal text-zinc-500">Advanced</span>
   return (
     <Dialog open={name !== null} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="size-2.5 rounded-full" style={{ background: branchColor(b) }} />
             <span className="truncate">{b}</span>
             {b === p.branch && <Badge variant="secondary" className="font-normal">current</Badge>}
+            {isProtected && <Badge variant="outline" className="font-normal"><Shield className="size-3" /> protected</Badge>}
             {favorite && <Star className="size-4 fill-amber-400 text-amber-500" />}
           </DialogTitle>
           <DialogDescription>
             {isMain ? "The project's default branch." : `Started from ${baseCommit?.branch ?? "main"} by ${createdBy}, ${formatWhen(createdAt, false)}.`}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 text-sm">
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              [own.length || 0, own.length === 1 ? "commit" : "commits"],
-              [isMain ? "–" : behind, isMain ? "default branch" : `behind main`],
-              [locks, locks === 1 ? "locked file" : "locked files"],
-            ].map(([n, l]) => (
-              <div key={l as string} className="rounded-lg border bg-zinc-50 px-3 py-2">
-                <div className="text-lg font-semibold">{n}</div>
-                <div className="text-xs text-zinc-500">{l}</div>
-              </div>
-            ))}
-          </div>
-          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-xs">
-            <Fact label="Latest commit">
-              <div className="truncate">{head.message}</div>
-              <div className="text-zinc-500">{head.author} · {formatWhen(head.at, false)}{dev && <> · <code>{head.id}</code></>}</div>
-            </Fact>
-            {!isMain && <Fact label="Started from">{baseCommit?.branch ?? "main"}{dev && baseCommit && <> at <code>{baseCommit.id}</code></>}</Fact>}
-            {!isMain && <Fact label="Created">{createdBy}, {new Date(createdAt).toISOString().slice(0, 16).replace("T", " ")}</Fact>}
-            <Fact label="Merged">{isMain ? "–" : mergedInto ? <span className="text-emerald-700">Yes, into {mergedInto}</span> : "Not merged yet"}</Fact>
-            <Fact label="Protected">{isProtected ? "Yes: changes need a review before they land" : "No"}</Fact>
-            <Fact label="Contributors">
-              <span className="flex flex-wrap items-center gap-1">
-                {contributors.map((a) => <span key={a} className="flex items-center gap-1 rounded-full border py-px pl-px pr-2"><Avatar initials={a.slice(0, 2).toUpperCase()} className="size-4 text-[8px]" style={{ background: branchColor(a) }} />{a}</span>)}
-              </span>
-            </Fact>
-            {dev && <Fact label="Ref"><code>refs/branches/{b}</code></Fact>}
-          </dl>
-        </div>
+        <Tabs value={tab} onValueChange={setTab} className="gap-3">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="pointer"><HistoryIcon /> Pointer history{adv}</TabsTrigger>
+            <TabsTrigger value="meta">Metadata{adv}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview" className="min-h-72 space-y-4 text-sm">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                [own.length || 0, own.length === 1 ? "commit" : "commits"],
+                [isMain ? "–" : behind, isMain ? "default branch" : `behind main`],
+                [locks, locks === 1 ? "locked file" : "locked files"],
+              ].map(([n, l]) => (
+                <div key={l as string} className="rounded-lg border bg-zinc-50 px-3 py-2">
+                  <div className="text-lg font-semibold">{n}</div>
+                  <div className="text-xs text-zinc-500">{l}</div>
+                </div>
+              ))}
+            </div>
+            <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-xs">
+              <Fact label="Latest commit">
+                <div className="truncate">{head.message}</div>
+                <div className="text-zinc-500">{head.author} · {formatWhen(head.at, false)}{dev && <> · <code>{head.id}</code></>}</div>
+              </Fact>
+              {!isMain && <Fact label="Started from">{baseCommit?.branch ?? "main"}{dev && baseCommit && <> at <code>{baseCommit.id}</code></>}</Fact>}
+              {!isMain && <Fact label="Created">{createdBy}, {new Date(createdAt).toISOString().slice(0, 16).replace("T", " ")}</Fact>}
+              <Fact label="Merged">{isMain ? "–" : mergedInto ? <span className="text-emerald-700">Yes, into {mergedInto}</span> : "Not merged yet"}</Fact>
+              <Fact label="Protected">
+                <span className="flex items-start gap-2">
+                  <button
+                    role="switch" aria-checked={isProtected} aria-label="Protect from direct pushes"
+                    onClick={() => p.setProtected(b, !isProtected)}
+                    className={cn("relative mt-0.5 h-4 w-7 shrink-0 rounded-full transition-colors", isProtected ? "bg-zinc-900" : "bg-zinc-300")}
+                  ><span className={cn("absolute top-0.5 size-3 rounded-full bg-white transition-all", isProtected ? "left-3.5" : "left-0.5")} /></button>
+                  <span>{isProtected ? "Direct pushes are refused. Work lands by merging another branch into it." : "Anyone can push to it."}{dev && <code className="ml-1 text-zinc-400">lore branch {isProtected ? "unprotect" : "protect"} {b}</code>}</span>
+                </span>
+              </Fact>
+              <Fact label="Contributors">
+                <span className="flex flex-wrap items-center gap-1">
+                  {contributors.map((a) => <span key={a} className="flex items-center gap-1 rounded-full border py-px pl-px pr-2"><Avatar initials={a.slice(0, 2).toUpperCase()} className="size-4 text-[8px]" style={{ background: branchColor(a) }} />{a}</span>)}
+                </span>
+              </Fact>
+              {dev && <Fact label="Branch ID"><code>{branchId(b)}</code></Fact>}
+            </dl>
+          </TabsContent>
+          <TabsContent value="pointer" className="min-h-72 space-y-2 text-xs">
+            <p className="text-zinc-500">Where this computer's copy of {b} has pointed, newest first. Use it to undo a bad sync or merge by resetting to an earlier point.</p>
+            <ol className="max-h-56 divide-y overflow-auto rounded-md border">
+              {pointers.map((r, i) => (
+                <li key={r.id + i} className="group flex items-center gap-2 px-2 py-1.5">
+                  <span className="w-10 shrink-0 tabular-nums text-zinc-400">#{r.n}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{r.message}{r.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</span>
+                    <span className="text-zinc-500">{r.how} · {r.when}{dev && <> · <code>{r.id}</code></>}</span>
+                  </span>
+                  {i === 0 ? <span className="text-zinc-400">current</span> : <Button size="sm" variant="ghost" className="h-6 text-xs opacity-0 group-hover:opacity-100" onClick={() => reset(r.id)}>Reset here…</Button>}
+                </li>
+              ))}
+            </ol>
+            {dev && <code className="block text-[11px] text-zinc-400">$ lore branch latest list --branch {b}</code>}
+          </TabsContent>
+          <TabsContent value="meta" className="min-h-72"><MetadataTable branch={b} /></TabsContent>
+        </Tabs>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" onClick={() => p.say("Copied " + b)}><Copy className="size-4" /> Copy name</Button>
+          <div className="flex gap-1">
+            <Button variant="ghost" onClick={() => p.say("Copied " + b)}><Copy className="size-4" /> Copy name</Button>
+            <Button variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={!!blocker} title={blocker ? `Can't archive: ${blocker}` : undefined} onClick={() => { onClose(); p.openFlow({ kind: "archive-branch", branch: b }) }}><Archive className="size-4" /> Archive…</Button>
+            <Button variant="ghost" onClick={() => reset()}><Undo2 className="size-4" /> Reset…</Button>
+          </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Close</Button>
             <Button disabled={b === p.branch} onClick={() => onSwitch(b)}>Switch to this branch</Button>
@@ -338,7 +451,6 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
     </Dialog>
   )
 }
-
 
 function FileLine({ file, checked, onCheck, selected, onSelect }: { file: FileEntry; checked: boolean; onCheck: () => void; selected: boolean; onSelect: () => void }) {
   const p = useProto()
@@ -1058,11 +1170,13 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
   const trimmed = name.trim()
   const error = branchNameError(trimmed, branches)
   const changed = p.files.filter((f) => f.change).length
-  // `lore branch create` has no base option: it branches from the revision you're on. Starting from another
-  // branch means switching there first (our guess at the sequence), which we don't do over uncommitted changes.
+  // `lore branch create` has no base option: it forks from the revision you're synced to and switches to the new
+  // branch itself, without touching files. Starting from another branch means switching there first, which Lore
+  // refuses when it would change a file you've edited, so Scribe asks for a clean working tree in that case.
   const away = from !== p.branch
   const blocked = changed > 0 && away
-  const steps = [away && `lore branch switch ${from}`, `lore branch create ${trimmed || "<name>"}`, switchNow ? `lore branch switch ${trimmed || "<name>"}` : away && `lore branch switch ${p.branch}`].filter(Boolean)
+  const nm = trimmed || "<name>"
+  const steps = [away && `lore branch switch ${from}`, `lore branch create ${nm}`, !switchNow && `lore branch switch ${p.branch}`].filter(Boolean)
   const canCreate = !!trimmed && !error && !blocked
   const submit = () => { if (canCreate) onCreate(trimmed, from, switchNow) }
 
@@ -1111,7 +1225,7 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-zinc-500">{away ? `Starts at the latest revision of ${from}. Scribe switches there to create it${switchNow ? "" : ", then back to " + p.branch}.` : "Starts at the revision you're on now."}</p>
+            <p className="text-xs text-zinc-500">{away ? `Starts at the latest revision of ${from}. Scribe switches there first to create it${switchNow ? "" : ", then back to " + p.branch}.` : `Starts at the revision you're on now${switchNow ? "" : `. Scribe switches back to ${p.branch} afterwards`}.`}</p>
             {dev && <code className="block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600">{steps.map((c) => <span key={String(c)} className="block">$ {c}</span>)}</code>}
           </div>
           <label className="flex items-start gap-2 text-sm">
@@ -1592,7 +1706,6 @@ function branchFacts(b: string) {
     contributors: [...new Set((own.length ? own : [head]).map((cm) => cm.author))],
     createdBy: oldest?.author ?? "You",
     createdAt: oldest?.at ?? NOW - 10 * 60_000,
-    isProtected: isMain || b.startsWith("release/"),
   }
 }
 
@@ -1606,7 +1719,7 @@ function BranchTooltip({ branch, current, x, y, maxY }: { branch: string; curren
         <span className="size-2.5 shrink-0 rounded-full" style={{ background: col }} />
         <span className="truncate">{branch}</span>
         {current && <span className="rounded bg-zinc-900 px-1.5 py-px text-[10px] font-medium text-white">current</span>}
-        {f.isProtected && <span className="rounded border px-1.5 py-px text-[10px] font-medium text-zinc-500">protected</span>}
+        {useProto().protectedBranches.includes(branch) && <span className="rounded border px-1.5 py-px text-[10px] font-medium text-zinc-500">protected</span>}
       </div>
       <p className="mb-2 text-zinc-500">{f.isMain ? "The project's default branch." : `Started from ${f.baseCommit?.branch ?? "main"} by ${f.createdBy}, ${formatWhen(f.createdAt, false)}.`}</p>
       <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1">
@@ -1813,7 +1926,7 @@ function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenCh
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Switch branch">
-          {BRANCHES.map((b) => (
+          {p.branches.map((b) => (
             <CommandItem key={b} value={`switch branch ${b}`} disabled={b === p.branch} onSelect={() => run(() => runCommand("switch-branch", b))}>
               <GitBranch /> {b}{b === p.branch && <span className="ml-auto text-xs text-zinc-400">current</span>}
             </CommandItem>
@@ -1821,7 +1934,7 @@ function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenCh
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading={`Merge into ${p.branch}`}>
-          {BRANCHES.filter((b) => b !== p.branch).map((b) => (
+          {p.branches.filter((b) => b !== p.branch).map((b) => (
             <CommandItem key={b} value={`merge ${b} into current`} onSelect={() => run(() => p.openFlow({ kind: "merge", branch: b, into: false }))}><GitMerge /> Merge {b}…</CommandItem>
           ))}
         </CommandGroup>

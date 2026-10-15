@@ -36,6 +36,15 @@ export const BRANCHES = [
   "feature/save-system", "art/env-pass", "art/character-pass-2", "art/ui-icons", "bugfix/crash-on-load", "experiment/new-lighting",
 ]
 
+/** A branch removed with `lore branch archive`: its name is freed, its history kept, restorable by id. */
+export type ArchivedBranch = { name: string; id: string; by: string; when: string }
+const INITIAL_ARCHIVED: ArchivedBranch[] = [
+  { name: "experiment/water-shader", id: "3f9c0a4e1b7d2c58e6a1f09b4d73c2e8", by: "Marco", when: "3 weeks ago" },
+  { name: "feature/old-inventory", id: "a81e5d2c94f03b7612ce8d0a5f4b9e17", by: "Ana", when: "2 months ago" },
+]
+/** A short, stable branch id for the mock (Lore ids are 16 bytes, hex). */
+export const branchId = (name: string) => { let h = 2166136261; for (const c of name) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h.toString(16).padStart(8, "0") + "d41c7e09b2a5f683").repeat(2).slice(0, 32) }
+
 const INITIAL_FILES: FileEntry[] = [
   { path: "Art/Characters/hero.psd", kind: "image", change: "modified", staged: false, ticked: true, lock: { by: "you" }, size: "212 MB" },
   { path: "Art/Characters/hero_rig.blend", kind: "model", change: "modified", staged: false, ticked: true, lock: { by: "you" }, size: "88 MB" },
@@ -110,6 +119,9 @@ export type Flow =
   | { kind: "switch"; branch: string; revision?: string }
   | { kind: "sync-conflict"; paths: string[] }
   | { kind: "release-lock"; path: string }
+  | { kind: "archive-branch"; branch: string }
+  | { kind: "restore-branch"; id: string }
+  | { kind: "reset-branch"; branch: string; revisions: { id: string; label: string }[]; target?: string }
   | { kind: "locks" }
 
 export type Resolution = "mine" | "theirs" | "manual"
@@ -142,6 +154,13 @@ type Proto = {
   commit: (msg: string) => void
   commitAndPush: (msg: string) => void
   push: () => void
+  branches: string[]; addBranch: (name: string) => void
+  archived: ArchivedBranch[]
+  archiveBranch: (name: string) => void
+  restoreBranch: (id: string, name: string) => void
+  protectedBranches: string[]; setProtected: (name: string, on: boolean) => void
+  branchMeta: Record<string, [string, string][]>; setBranchMeta: (name: string, entries: [string, string][]) => void
+  resetBranch: (name: string, revision: string) => void
   toggleTick: (path: string) => void
   toggleStage: (path: string) => void
   toggleLock: (path: string) => void
@@ -175,6 +194,10 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
   const [branch, setBranch] = useState("main")
   const [files, setFiles] = useState(INITIAL_FILES)
   const [historyList, setHistory] = useState(INITIAL_HISTORY)
+  const [branches, setBranches] = useState(BRANCHES)
+  const [archived, setArchived] = useState(INITIAL_ARCHIVED)
+  const [protectedBranches, setProtectedBranches] = useState(["main", "release/1.2", "release/1.1"])
+  const [branchMeta, setBranchMetaS] = useState<Record<string, [string, string][]>>({ main: [["ci.required", "build,tests"]], "release/1.2": [["release.date", "2026-11-03"], ["owner", "Marco"]] })
   // Local Commits left behind on other branches, restored when switching back.
   const [parked, setParked] = useState<Record<string, Revision[]>>({})
   const [lockWarning, setLockWarning] = useState(false)
@@ -361,6 +384,38 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     push: () => {
       if (!locals.length) return setToast("Nothing to push. Commit something first")
       send([], "")
+    },
+    branches,
+    addBranch: (name) => setBranches((bs) => [...bs, name]),
+    archived,
+    archiveBranch: (name) => {
+      setBranches((bs) => bs.filter((b) => b !== name))
+      setArchived((a) => [{ name, id: branchId(name), by: "You", when: "just now" }, ...a])
+      setFlow(null)
+      run("Archive", () => setToast(`Archived ${name}. Its history is kept; restore it from Archived branches`))
+    },
+    restoreBranch: (id, name) => {
+      setArchived((a) => a.filter((x) => x.id !== id))
+      setBranches((bs) => [...bs, name])
+      setFlow(null)
+      run("Restore", () => setToast(`Restored ${name}`))
+    },
+    protectedBranches,
+    setProtected: (name, on) => {
+      setProtectedBranches((ps) => (on ? [...ps, name] : ps.filter((b) => b !== name)))
+      setToast(on ? `${name} is protected: direct pushes are refused` : `${name} is no longer protected`)
+    },
+    branchMeta,
+    setBranchMeta: (name, entries) => setBranchMetaS((m) => ({ ...m, [name]: entries })),
+    resetBranch: (name, revision) => {
+      setFlow(null)
+      run("Reset branch", () => {
+        if (name === branch) {
+          setHistory((h) => h.filter((r) => !r.local))
+          setFiles(files.map((f) => ({ ...f, change: null, staged: false, ticked: false })))
+        }
+        setToast(`Local ${name} now points at ${revision}` + (name === branch ? ". Working files synced to it" : ""))
+      })
     },
     toggleTick: (p) => setFiles((fs) => fs.map((f) => (f.path === p ? { ...f, ticked: !f.ticked } : f))),
     toggleStage: (p) => setFiles((fs) => fs.map((f) => (f.path === p ? { ...f, staged: !f.staged } : f))),

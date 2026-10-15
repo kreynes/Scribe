@@ -1,6 +1,6 @@
 // PROTOTYPE: dialogs for the core Lore flows (diff, merge, sync, switch, locks). Opened from anywhere via p.openFlow().
 // Every option maps to a real `lore` flag (docs/reference/lore-cli-commands.md); Developer Mode shows the equivalent command.
-import { ArrowDownToLine, ArrowRight, CircleAlert, Columns2, Eye, GitBranch, GitMerge, Lock, LockOpen, Rows3, SplitSquareHorizontal, TriangleAlert } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowRight, CircleAlert, Columns2, Eye, GitBranch, GitMerge, Lock, LockOpen, Rows3, SplitSquareHorizontal, TriangleAlert, Undo2 } from "lucide-react"
 import { Fragment, useMemo, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { FileTypeIcon } from "./fileTypes"
-import { ChangeBadge, Thumb } from "./shared"
+import { ChangeBadge, Thumb, archiveBlocker } from "./shared"
 import { BRANCHES, INCOMING, allFiles, fileName, lockBranch, useProto, type FileEntry, type Flow } from "./state"
 
 /** The equivalent Lore command, shown in Developer Mode only. */
@@ -669,11 +669,11 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
             <section className="space-y-1.5">
               <div className="font-medium">Your changes</div>
               <RadioGroup value={changes} onValueChange={setChanges} className="space-y-1.5">
-                <Label className={radio}><RadioGroupItem value="keep" className="mt-0.5" /> <span>Bring them with me<span className="block text-xs text-zinc-500">They stay uncommitted on {flow.branch}</span></span></Label>
+                <Label className={radio}><RadioGroupItem value="keep" className="mt-0.5" /> <span>Keep them<span className="block text-xs text-zinc-500">Works only if {flow.branch} doesn't change those files. Otherwise Lore stops and nothing changes.</span></span></Label>
                 <Label className={radio}><RadioGroupItem value="reset" className="mt-0.5" /> <span>Discard them<span className="block text-xs text-red-600">Files go back to how they are on {flow.branch}</span></span></Label>
               </RadioGroup>
               <button className="text-xs text-zinc-500 underline" onClick={() => { p.closeFlow(); window.dispatchEvent(new CustomEvent("scribe:command", { detail: { type: "tab", value: "staging" } })) }}>Commit them first instead</button>
-              {dev && <p className="text-[11px] text-zinc-500">Guess: without <code>--reset</code> Lore keeps local edits across a switch, since <code>--reset</code> is what discards them.</p>}
+              {dev && <p className="text-[11px] text-zinc-500">Without <code>--reset</code>, Lore refuses the whole switch with <code>LocalModifications</code> if the target changes an edited file, or if anything is staged. How Scribe shows that is still open.</p>}
             </section>
           )}
           <section className="space-y-1.5">
@@ -803,6 +803,111 @@ function LocksDialog() {
   )
 }
 
+// ---------------------------------------------------------------- Branch management
+
+function ArchiveBranchDialog({ flow }: { flow: Extract<Flow, { kind: "archive-branch" }> }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const [layers, setLayers] = useState(false)
+  const [links, setLinks] = useState(false)
+  const b = flow.branch
+  const why = archiveBlocker(p, b)
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Archive className="size-5" /> Archive {b}?</DialogTitle>
+          <DialogDescription>
+            It disappears from the branch list, for everyone: here and on the Lore Server. Its commits and history are kept, and the name is free to reuse. You can restore it later from <b>Archived branches</b>.
+          </DialogDescription>
+        </DialogHeader>
+        {dev && (
+          <div className="space-y-1.5 text-xs">
+            <Label className="font-normal text-zinc-400"><Checkbox disabled checked={layers} onCheckedChange={(v) => setLayers(v === true)} /> Also archive it in layers (this project has none)</Label>
+            <Label className="font-normal text-zinc-400"><Checkbox disabled checked={links} onCheckedChange={(v) => setLinks(v === true)} /> Also archive it in linked repositories (this project has none)</Label>
+          </div>
+        )}
+        <Cli>lore branch archive {b}{layers ? " --include-layers" : ""}{links ? " --include-links" : ""}</Cli>
+        <DialogFooter>
+          <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
+          <Button variant="destructive" disabled={!!why} title={why ? `Lore refuses: ${why}` : undefined} onClick={() => p.archiveBranch(b)}><Archive className="size-4" /> Archive branch</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RestoreBranchDialog({ flow }: { flow: Extract<Flow, { kind: "restore-branch" }> }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const a = p.archived.find((x) => x.id === flow.id)
+  const [name, setName] = useState(a?.name ?? "")
+  if (!a) return null
+  const taken = p.branches.includes(name.trim())
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><ArchiveRestore className="size-5" /> Restore {a.name}</DialogTitle>
+          <DialogDescription>Archived by {a.by}, {a.when}. It comes back with all its commits.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="restore-name">Name</Label>
+          <Input id="restore-name" value={name} onChange={(e) => setName(e.target.value)} className={cn("font-mono text-sm", taken && "border-red-400")} />
+          {taken ? <p className="text-xs text-red-600">A branch with this name exists now. Pick another name.</p> : <p className="text-xs text-zinc-500">Someone may have reused the name since; you can restore it under a new one.</p>}
+        </div>
+        {dev && <p className="text-[11px] text-zinc-500">There's no unarchive command: Lore re-attaches the old branch id to a name. Guess: works against the server's copy too (only the local path was read).</p>}
+        <Cli>lore branch create {name.trim() || "<name>"} --id {a.id}</Cli>
+        <DialogFooter>
+          <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
+          <Button disabled={!name.trim() || taken} onClick={() => p.restoreBranch(a.id, name.trim())}>Restore branch</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ResetBranchDialog({ flow }: { flow: Extract<Flow, { kind: "reset-branch" }> }) {
+  const p = useProto()
+  const b = flow.branch
+  const [target, setTarget] = useState(flow.target ?? flow.revisions[1]?.id ?? flow.revisions[0]?.id ?? "")
+  const [typed, setTyped] = useState("")
+  const current = b === p.branch
+  const changed = p.files.filter((f) => f.change).length
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Undo2 className="size-5" /> Reset local {b}</DialogTitle>
+          <DialogDescription>Move this computer's copy of {b} back to an earlier revision. The Lore Server isn't changed.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="space-y-1.5">
+            <Label>Move it to</Label>
+            <Select value={target} onValueChange={setTarget}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>{flow.revisions.map((r) => <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <ul className="list-disc space-y-1 rounded-md border border-amber-200 bg-amber-50 py-2 pl-7 pr-3 text-xs text-amber-900">
+            <li>Local Commits after that revision are no longer on the branch. Pointer history still lists them.</li>
+            {current && <li>Your working files are synced to that revision{changed ? `, so your ${changed} uncommitted change${changed === 1 ? " is" : "s are"} discarded` : ""}. (Guess, not yet verified against a live server.)</li>}
+          </ul>
+          <div className="space-y-1.5">
+            <Label htmlFor="reset-confirm">Type <code className="rounded bg-zinc-100 px-1">{b}</code> to confirm</Label>
+            <Input id="reset-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} className="font-mono text-sm" autoComplete="off" />
+          </div>
+          <Cli>lore branch reset {target} --branch {b}</Cli>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
+          <Button variant="destructive" disabled={typed !== b || !target} onClick={() => p.resetBranch(b, target)}>Reset branch</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /** Renders whichever flow dialog is open. Keyed by the flow so a new one starts with fresh state. */
 export function Flows() {
   const f = useProto().flow
@@ -816,6 +921,9 @@ export function Flows() {
       {f.kind === "switch" && <SwitchDialog flow={f} />}
       {f.kind === "release-lock" && <ReleaseLockDialog flow={f} />}
       {f.kind === "locks" && <LocksDialog />}
+      {f.kind === "archive-branch" && <ArchiveBranchDialog flow={f} />}
+      {f.kind === "restore-branch" && <RestoreBranchDialog flow={f} />}
+      {f.kind === "reset-branch" && <ResetBranchDialog flow={f} />}
     </Fragment>
   )
 }
