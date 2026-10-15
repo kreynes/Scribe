@@ -19,7 +19,9 @@ export type FileEntry = {
 
 export type Revision = {
   id: string
+  /** The summary line. Lore stores one message; Scribe writes it as summary, blank line, description. */
   message: string
+  description?: string
   author: string
   when: string
   files: number
@@ -28,6 +30,38 @@ export type Revision = {
   /** Files a local Commit changed, so pushing it can release their Locks. */
   paths?: string[]
 }
+
+/** What the commit boxes collect. Both parts are required. */
+export type CommitMsg = { summary: string; description: string }
+export const EMPTY_MSG: CommitMsg = { summary: "", description: "" }
+export const msgReady = (m: CommitMsg) => !!m.summary.trim() && !!m.description.trim()
+/** How the message reaches `lore commit`: one string, summary then a blank line then the description. */
+export const cliMsg = (m: CommitMsg) => `"${m.summary.trim() || "<summary>"}\\n\\n${m.description.trim() || "<description>"}"`
+
+/** Mock descriptions, keyed by revision id. */
+export const DESCRIPTIONS: Record<string, string> = {
+  "9f3c2a1e": "Rebaked the forest lightmaps after the new sun angle. Fog density down 15%, bounce light up on the moss.",
+  "4b81d0c7": "Third pass on the villain's textures: sharper armour edges, less saturated cape, roughness fixed on the gloves.",
+  "e02a77f5": "First blockout of the new hero sculpt. Proportions only; no detail pass yet.",
+  "71cc9b20": "Imported Sam's footstep library: grass, stone, wood and metal, 4 variations each.",
+  "a41f7c09": "Added facial controls to the hero rig: brows, jaw, lip corners. Weights still rough around the mouth.",
+  "5d0b8e44": "Brings the environment pass into main: rock and moss textures plus forest tile set 03.",
+  "f7e2a913": "New rock albedo and normal maps, moss blend material, tiling fixed on the large boulders.",
+  "0be93d6f": "Takes Sam's crash fix into the 1.2 release candidate.",
+  "93c7f05b": "forest.umap crashed on load when its textures hadn't streamed in yet. The level now waits for them.",
+  "2c6d1b70": "Third forest tile set: ferns, roots and the path edges.",
+  "1f84c2ad": "Branch for the hero rework: new sculpt, rig and materials.",
+  "6a1e40d2": "Version bump and changelog for the 1.2 candidate build.",
+  "d1e4b6a0": "Six gravel footstep variations to break up repetition on the castle path.",
+  "e8b5a6c1": "Blockout for the environment pass: terrain, rough rocks and placeholder trees.",
+  "8c72fe31": "Front, side and back turnaround of the hero for the modelling team.",
+  "3a90f1b2": "Folder structure, project settings and starter content for the vertical slice.",
+  "b07a9d52": "Grey placeholder icons for the inventory and pause menus until the UI pass.",
+  "c55d0e7a": "First import of the project from the old repository.",
+  "5d0e8f21": "Warmer colour on forest tile 03 so it matches the lighting pass, plus notes on the new export settings.",
+}
+export const descriptionOf = (r: { id: string; description?: string; message?: string }) =>
+  r.description ?? DESCRIPTIONS[r.id] ?? (r.message ? `${r.message.split(":")[0]}: ${r.message.split(": ")[1] ?? "update"} for the character pass. Notes are in the review sheet.` : "")
 
 export type Teammate = { name: string; initials: string; editing: string[]; online: boolean }
 
@@ -94,7 +128,7 @@ export const LORE_LOG = [
 ]
 
 /** A revision on the server that this computer hasn't synced yet. It touches two files you have changed locally. */
-export const INCOMING = { id: "5d0e8f21", message: "Forest tile colour fix, pipeline notes", author: "Marco", paths: ["Art/Env/forest_tile_03.png", "Docs/art-pipeline.md"], others: 9 }
+export const INCOMING = { id: "5d0e8f21", message: "Forest tile colour fix, pipeline notes", description: DESCRIPTIONS["5d0e8f21"], author: "Marco", paths: ["Art/Env/forest_tile_03.png", "Docs/art-pipeline.md"], others: 9 }
 
 /** Files a revision changed. Deterministic mock, shared by History, the diff viewer and the Revision menu. */
 export function changedFilesFor(rev: Pick<Revision, "id" | "files">) {
@@ -102,8 +136,23 @@ export function changedFilesFor(rev: Pick<Revision, "id" | "files">) {
   return PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
 }
 
+const CHANGE_KINDS = ["modified", "modified", "added", "modified", "deleted"] as const
+export type ChangedFile = FileEntry & { how: (typeof CHANGE_KINDS)[number] }
+const SYNTH_DIRS: [string, FileEntry["kind"], string][] = [["Art/Env/Props", "image", "png"], ["Art/Characters/Textures", "image", "tga"], ["Content/Meshes", "model", "fbx"], ["Audio/SFX", "audio", "wav"], ["Levels/Sublevels", "scene", "umap"], ["Docs/Notes", "text", "md"]]
+/** Every file a revision changed and how. Real project files come first (the same ones changedFilesFor picks); made-up ones fill the rest. */
+export function revisionFiles(rev: Pick<Revision, "id" | "files">): ChangedFile[] {
+  const seed = rev.id.charCodeAt(0) + rev.id.charCodeAt(1)
+  const real = PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
+  const out: ChangedFile[] = real.map((f, i) => ({ ...f, how: CHANGE_KINDS[(i + seed) % CHANGE_KINDS.length] }))
+  for (let i = out.length; i < rev.files; i++) {
+    const [dir, kind, ext] = SYNTH_DIRS[(i + seed) % SYNTH_DIRS.length]
+    out.push({ path: `${dir}/${dir.split("/").pop()!.toLowerCase()}_${String(i).padStart(3, "0")}.${ext}`, kind, change: null, staged: false, ticked: false, lock: null, size: `${1 + ((i * 7 + seed) % 40)} MB`, how: CHANGE_KINDS[(i + seed) % CHANGE_KINDS.length] })
+  }
+  return out
+}
+
 /** Diff for one revision: the files it changed, compared with its parent. `path` is shown first. */
-export const revisionDiff = (rev: Pick<Revision, "id" | "message" | "files">, path?: string): Flow => {
+export const revisionDiff = (rev: Pick<Revision, "id" | "message" | "files">, path?: string): Extract<Flow, { kind: "diff" }> => {
   const paths = changedFilesFor(rev).map((f) => f.path)
   return { kind: "diff", paths: path ? [path, ...paths.filter((x) => x !== path)] : paths, revision: { id: rev.id, message: rev.message, files: rev.files } }
 }
@@ -113,7 +162,7 @@ export const allFiles = (files: FileEntry[]) => [...PROJECT_TREE.map((t) => file
 
 /** Dialogs any screen can open. Rendered once by <Flows /> in flows.tsx. */
 export type Flow =
-  | { kind: "diff"; paths: string[]; revision?: Pick<Revision, "id" | "message" | "files">; conflict?: boolean }
+  | { kind: "diff"; paths: string[]; revision?: Pick<Revision, "id" | "message" | "files">; conflict?: boolean; back?: Flow }
   | { kind: "merge"; branch: string; into: boolean }
   | { kind: "sync"; target?: string; reset?: boolean; preview?: boolean }
   | { kind: "switch"; branch: string; revision?: string }
@@ -123,10 +172,14 @@ export type Flow =
   | { kind: "restore-branch"; id: string }
   | { kind: "reset-branch"; branch: string; revisions: { id: string; label: string }[]; target?: string }
   | { kind: "locks" }
+  | { kind: "commit-info"; revision: Revision & { at?: number }; branch: string }
+
+/** "Take me there": a link in an information panel asks the main window to open the right place with this selected. */
+export type NavTarget = { kind: "revision"; id: string; branch?: string } | { kind: "branch"; id: string } | { kind: "file"; id: string }
 
 export type Resolution = "mine" | "theirs" | "manual"
 /** What sent the user to the conflict screen. "demo" = the prototype switcher. */
-export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string; push?: { sent: string[]; commits: number }; merged?: boolean }
+export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: CommitMsg; push?: { sent: string[]; commits: number }; merged?: boolean }
 
 export type SyncOpts = { target?: string; reset?: boolean }
 export type SwitchOpts = { revision?: string; reset?: boolean; local?: boolean; force?: boolean; copy?: boolean }
@@ -144,6 +197,7 @@ type Proto = {
   operation: { label: string; pct: number } | null
   toast: string | null; say: (t: string) => void
   flow: Flow | null; openFlow: (f: Flow) => void; closeFlow: () => void
+  nav: (NavTarget & { seq: number }) | null; goTo: (t: NavTarget) => void; doneNav: () => void
   conflict: ConflictCtx; startConflict: (c: ConflictCtx) => void; finishConflict: (r: Record<string, Resolution>) => void; leaveConflict: (aborted: boolean) => void
   incoming: typeof INCOMING | null
   lastScan: number; autoScan: boolean; setAutoScan: (b: boolean) => void
@@ -151,11 +205,11 @@ type Proto = {
   sync: (opts?: SyncOpts) => void
   requestSwitch: (b: string) => void
   switchBranch: (b: string, opts?: SwitchOpts) => void
-  switchCommitFirst: (b: string, message: string) => void
-  syncClash: (choice: ClashChoice, o: { paths: string[]; message: string; copy: boolean; branchName: string }) => void
-  merge: (branch: string, into: boolean, opts: { message: string; noCommit: boolean; conflicts: string[] }) => void
-  commit: (msg: string) => void
-  commitAndPush: (msg: string) => void
+  switchCommitFirst: (b: string, message: CommitMsg) => void
+  syncClash: (choice: ClashChoice, o: { paths: string[]; message: CommitMsg; copy: boolean; branchName: string }) => void
+  merge: (branch: string, into: boolean, opts: { message: CommitMsg; noCommit: boolean; conflicts: string[] }) => void
+  commit: (msg: CommitMsg) => void
+  commitAndPush: (msg: CommitMsg) => void
   push: () => void
   branches: string[]; addBranch: (name: string) => void
   archived: ArchivedBranch[]
@@ -177,7 +231,7 @@ export const useProto = () => useContext(Ctx)!
 
 let seq = 0
 const newId = () => ((0x5e1f0000 + (Date.now() % 0xffff) * 977 + ++seq * 2654435761) >>> 0).toString(16).padStart(8, "0")
-const localRev = (message: string, paths: string[], count = paths.length): Revision => ({ id: newId(), message, author: "You", when: "just now", files: Math.max(1, count), local: true, paths })
+const localRev = (m: CommitMsg, paths: string[], count = paths.length): Revision => ({ id: newId(), message: m.summary.trim(), description: m.description.trim(), author: "You", when: "just now", files: Math.max(1, count), local: true, paths })
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 function readParam<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -208,6 +262,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
   const [operation, setOperation] = useState<{ label: string; pct: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [flow, setFlow] = useState<Flow | null>(null)
+  const [nav, setNav] = useState<(NavTarget & { seq: number }) | null>(null)
   const [conflict, setConflict] = useState<ConflictCtx>({ origin: "demo" })
   const [incoming, setIncoming] = useState<typeof INCOMING | null>(INCOMING)
   const [lastScan, setLastScan] = useState(() => Date.now() - 4 * 60_000)
@@ -240,7 +295,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
   const locals = historyList.filter((r) => r.local)
 
   /** Commit & Push / Push: commit the ticked files (if any), sync, push every local Commit, release the pushed files' Locks. */
-  const send = (picked: FileEntry[], msg: string) => {
+  const send = (picked: FileEntry[], msg: CommitMsg) => {
     const sent = [...new Set([...locals.flatMap((r) => r.paths ?? []), ...picked.map((f) => f.path)])]
     const commits = locals.length + (picked.length ? 1 : 0)
     const fresh = picked.length ? localRev(msg, picked.map((f) => f.path)) : null
@@ -270,7 +325,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     setHistory((h) => {
       const local = h.filter((r) => r.local || r.when === "just now")
       const rest = h.filter((r) => !(r.local || r.when === "just now"))
-      return [...local, { id: incoming.id, message: incoming.message, author: incoming.author, when: "just now (synced)", files: incoming.paths.length + incoming.others }, ...rest]
+      return [...local, { id: incoming.id, message: incoming.message, description: incoming.description, author: incoming.author, when: "just now (synced)", files: incoming.paths.length + incoming.others }, ...rest]
     })
     setFiles((fs) => fs.map((f) => (resetPaths.includes(f.path) ? { ...f, change: null, staged: false, ticked: false } : f)))
     setIncoming(null)
@@ -289,6 +344,7 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     operation,
     toast, say: setToast,
     flow, openFlow: setFlow, closeFlow: () => setFlow(null),
+    nav, goTo: (t) => { setFlow(null); setNav({ ...t, seq: Date.now() }) }, doneNav: () => setNav(null),
     conflict,
     startConflict: (c) => { setConflict(c); setFlow(null); setScreenS("conflict"); writeParam("screen", "conflict") },
     finishConflict: (r) => {
@@ -300,14 +356,14 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
         else {
           applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
           if (conflict.merged) {
-            setHistory((h) => [localRev(`Merge ${INCOMING.id} from the server`, [], n), ...h])
+            setHistory((h) => [localRev({ summary: `Merge ${INCOMING.id} from the server`, description: `Merged ${INCOMING.author}'s “${INCOMING.message}” with your Commit. ${plural(n, "file")} decided by hand.` }, [], n), ...h])
             setToast(`Sync finished: ${plural(n, "file")} merged in a local Commit. Push to share it`)
           }
         }
       } else if (conflict.origin === "merge") {
         if (conflict.noCommit) setToast(`Merge resolved. Nothing is committed yet: review it in Staging, then commit`)
         else {
-          setHistory((h) => [localRev(conflict.message || `Merge ${conflict.source} into ${branch}`, [], n), ...h])
+          setHistory((h) => [localRev(conflict.message ?? { summary: `Merge ${conflict.source} into ${branch}`, description: `${plural(n, "conflict")} resolved by hand.` }, [], n), ...h])
           setToast(`Merged ${conflict.source} into ${branch} (not pushed yet)`)
         }
       } else setToast(`Resolved ${n} conflicts`)
@@ -406,16 +462,16 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       if (conflicts.length) return run("Merge", () => value.startConflict({ origin: "merge", source, paths: conflicts, noCommit, message }))
       run("Merge", () => {
         if (noCommit) return setToast(`Merged ${source} into your working copy. Review it in Staging, then commit`)
-        setHistory((h) => [localRev(message || `Merge ${source} into ${branch}`, [], 6), ...h])
+        setHistory((h) => [localRev(message, [], 6), ...h])
         setToast(`Merged ${source} into ${branch} with no conflicts (not pushed yet)`)
       })
     },
     commit: (msg) => {
       const picked = files.filter((f) => (mode === "developer" ? f.staged : f.ticked) && f.change)
       if (!picked.length) return setToast("Nothing selected to commit")
-      if (!msg.trim()) return setToast("Write a commit message first")
+      if (!msgReady(msg)) return setToast("Write a summary and a description first")
       run("Commit", () => {
-        setHistory((h) => [localRev(msg.trim(), picked.map((f) => f.path)), ...h])
+        setHistory((h) => [localRev(msg, picked.map((f) => f.path)), ...h])
         setFiles(files.map((f) => (picked.includes(f) ? { ...f, change: null, staged: false, ticked: false } : f)))
         setToast("Committed locally (not pushed yet)")
       })
@@ -423,12 +479,12 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     commitAndPush: (msg) => {
       const picked = files.filter((f) => f.ticked && f.change)
       if (!picked.length && !locals.length) return setToast("Nothing to send")
-      if (picked.length && !msg.trim()) return setToast("Write a commit message first")
-      send(picked, msg.trim())
+      if (picked.length && !msgReady(msg)) return setToast("Write a summary and a description first")
+      send(picked, msg)
     },
     push: () => {
       if (!locals.length) return setToast("Nothing to push. Commit something first")
-      send([], "")
+      send([], EMPTY_MSG)
     },
     branches,
     addBranch: (name) => setBranches((bs) => [...bs, name]),

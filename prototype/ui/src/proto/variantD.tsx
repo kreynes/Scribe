@@ -13,11 +13,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { ArchivedBranchMenu, BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu, archiveBlocker } from "./shared"
-import { BRANCHES, PROJECT_TREE, branchId, changedFilesFor, fileName, lockBranch, revisionDiff, useProto, type FileEntry, type Mode } from "./state"
+import { ArchivedBranchMenu, BranchLink, BranchMenu, ChangeBadge, CommitMessageFields, FileLink, FileMenu, LoreLog, OperationBar, RevLink, RevisionMenu, archiveBlocker } from "./shared"
+import { BRANCHES, EMPTY_MSG, PROJECT_TREE, branchId, descriptionOf, fileName, lockBranch, msgReady, revisionDiff, revisionFiles, useProto, type CommitMsg, type FileEntry, type Mode } from "./state"
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
@@ -80,6 +79,11 @@ function SidePanel() {
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { if (searchOpen) inputRef.current?.focus() }, [searchOpen])
   const info = PROJECTS.find((pr) => pr.name === project)!
+  // A branch link anywhere opens its Branch information; any other link closes it.
+  useEffect(() => {
+    if (!p.nav) return
+    if (p.nav.kind === "branch") { setInfoFor(p.nav.id); p.doneNav() } else setInfoFor(null)
+  }, [p.nav?.seq])
   useEffect(() => {
     const onCmd = (e: Event) => {
       const { type, value } = (e as CustomEvent<{ type: string; value?: string }>).detail
@@ -308,7 +312,7 @@ function pointerHistory(b: string, p: ReturnType<typeof useProto>) {
   const pushed = (own.length ? own : [head]).slice(0, 6)
   const top = 40 + pushed.length + locals.length
   return [
-    ...locals.map((r, i) => ({ id: r.id, message: r.message, how: "Commit", when: "just now", n: top - i, local: true })),
+    ...locals.map((r, i) => ({ id: r.id, message: r.message, how: "Commit", when: "just now", n: top - i, local: true as boolean })),
     ...pushed.map((cm, i) => ({ id: cm.id, message: cm.message, how: ["Sync", "Push", "Commit"][i % 3], when: formatWhen(cm.at, false), n: top - locals.length - i, local: false })),
   ]
 }
@@ -325,19 +329,19 @@ function MetadataTable({ branch }: { branch: string }) {
       <div className="rounded-md border">
         {rows.map(([key, val]) => (
           <div key={key} className="flex items-center gap-2 border-b px-2 py-1.5 last:border-b-0">
-            <code className="w-36 shrink-0 truncate">{key}</code>
-            <span className="min-w-0 flex-1 truncate">{val}</span>
+            <code className="w-36 min-w-0 shrink truncate" title={key}>{key}</code>
+            <span className="min-w-0 flex-1 truncate" title={val}>{val}</span>
             <button aria-label={`Remove ${key}`} className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900" onClick={() => p.setBranchMeta(branch, rows.filter(([x]) => x !== key))}><X className="size-3.5" /></button>
           </div>
         ))}
         {!rows.length && <div className="px-2 py-2 text-zinc-400">No metadata on this branch.</div>}
       </div>
-      <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); add() }}>
-        <Input value={k} onChange={(e) => setK(e.target.value)} placeholder="key" className="h-7 w-36 font-mono text-xs" />
-        <Input value={v} onChange={(e) => setV(e.target.value)} placeholder="value" className="h-7 flex-1 text-xs" />
-        <Button type="submit" size="sm" variant="outline" className="h-7 text-xs" disabled={!k.trim()}>Add</Button>
+      <form className="flex min-w-0 gap-1.5" onSubmit={(e) => { e.preventDefault(); add() }}>
+        <Input value={k} onChange={(e) => setK(e.target.value)} placeholder="key" className="h-7 w-36 min-w-0 shrink font-mono text-xs" />
+        <Input value={v} onChange={(e) => setV(e.target.value)} placeholder="value" className="h-7 min-w-0 flex-1 text-xs" />
+        <Button type="submit" size="sm" variant="outline" className="h-7 shrink-0 text-xs" disabled={!k.trim()}>Add</Button>
       </form>
-      {p.mode === "developer" && <code className="block text-[11px] text-zinc-400">$ lore branch metadata set {k.trim() || "<key>"} {v || "<value>"} --branch {branch}</code>}
+      {p.mode === "developer" && <code className="block truncate text-[11px] text-zinc-400">$ lore branch metadata set {k.trim() || "<key>"} {v || "<value>"} --branch {branch}</code>}
     </div>
   )
 }
@@ -357,27 +361,26 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
   const reset = (target?: string) => { onClose(); p.openFlow({ kind: "reset-branch", branch: b, revisions, target }) }
   const locks = b === p.branch ? p.files.concat(PROJECT_TREE).filter((f, i, a) => f.lock && a.findIndex((g) => g.path === f.path) === i).length : own.length ? (own.length * 3) % 5 : 0
   const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => <><dt className="text-zinc-500">{label}</dt><dd className="min-w-0">{children}</dd></>
-  const adv = !dev && <span className="ml-1 rounded border px-1 text-[9px] font-normal text-zinc-500">Advanced</span>
   return (
     <Dialog open={name !== null} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full" style={{ background: branchColor(b) }} />
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
+        <DialogHeader className="min-w-0">
+          <DialogTitle className="flex min-w-0 items-center gap-2 pr-6">
+            <span className="size-2.5 shrink-0 rounded-full" style={{ background: branchColor(b) }} />
             <span className="truncate">{b}</span>
             {b === p.branch && <Badge variant="secondary" className="font-normal">current</Badge>}
             {isProtected && <Badge variant="outline" className="font-normal"><Shield className="size-3" /> protected</Badge>}
             {favorite && <Star className="size-4 fill-amber-400 text-amber-500" />}
           </DialogTitle>
           <DialogDescription>
-            {isMain ? "The project's default branch." : `Started from ${baseCommit?.branch ?? "main"} by ${createdBy}, ${formatWhen(createdAt, false)}.`}
+            {isMain ? "The project's default branch." : <>Started from <BranchLink name={baseCommit?.branch ?? "main"} /> by {createdBy}, {formatWhen(createdAt, false)}.</>}
           </DialogDescription>
         </DialogHeader>
-        <Tabs value={tab} onValueChange={setTab} className="gap-3">
+        <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-3">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="pointer"><HistoryIcon /> Pointer history{adv}</TabsTrigger>
-            <TabsTrigger value="meta">Metadata{adv}</TabsTrigger>
+            <TabsTrigger value="pointer"><HistoryIcon /> Pointer history</TabsTrigger>
+            <TabsTrigger value="meta">Metadata</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="min-h-72 space-y-4 text-sm">
             <div className="grid grid-cols-3 gap-2">
@@ -394,12 +397,12 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
             </div>
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-xs">
               <Fact label="Latest commit">
-                <div className="truncate">{head.message}</div>
-                <div className="text-zinc-500">{head.author} · {formatWhen(head.at, false)}{dev && <> · <code>{head.id}</code></>}</div>
+                <RevLink id={head.id} branch={own.length ? b : "main"} className="block max-w-full truncate">{head.message}</RevLink>
+                <div className="text-zinc-500">{head.author} · {formatWhen(head.at, false)} · <RevLink id={head.id} branch={own.length ? b : "main"} /></div>
               </Fact>
-              {!isMain && <Fact label="Started from">{baseCommit?.branch ?? "main"}{dev && baseCommit && <> at <code>{baseCommit.id}</code></>}</Fact>}
+              {!isMain && <Fact label="Started from"><BranchLink name={baseCommit?.branch ?? "main"} />{baseCommit && <> at <RevLink id={baseCommit.id} branch={baseCommit.branch} /></>}</Fact>}
               {!isMain && <Fact label="Created">{createdBy}, {new Date(createdAt).toISOString().slice(0, 16).replace("T", " ")}</Fact>}
-              <Fact label="Merged">{isMain ? "–" : mergedInto ? <span className="text-emerald-700">Yes, into {mergedInto}</span> : "Not merged yet"}</Fact>
+              <Fact label="Merged">{isMain ? "–" : mergedInto ? <span className="text-emerald-700">Yes, into <BranchLink name={mergedInto} /></span> : "Not merged yet"}</Fact>
               <Fact label="Protected">
                 <span className="flex items-start gap-2">
                   <button
@@ -425,8 +428,8 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
                 <li key={r.id + i} className="group flex items-center gap-2 px-2 py-1.5">
                   <span className="w-10 shrink-0 tabular-nums text-zinc-400">#{r.n}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{r.message}{r.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</span>
-                    <span className="text-zinc-500">{r.how} · {r.when}{dev && <> · <code>{r.id}</code></>}</span>
+                    <span className="flex min-w-0 items-center gap-1"><RevLink id={r.id} branch={b} className="truncate">{r.message}</RevLink>{r.local && <Badge variant="outline" className="font-normal">not pushed</Badge>}</span>
+                    <span className="text-zinc-500">{r.how} · {r.when} · <RevLink id={r.id} branch={b} /></span>
                   </span>
                   {i === 0 ? <span className="text-zinc-400">current</span> : <Button size="sm" variant="ghost" className="h-6 text-xs opacity-0 group-hover:opacity-100" onClick={() => reset(r.id)}>Reset here…</Button>}
                 </li>
@@ -436,13 +439,13 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
           </TabsContent>
           <TabsContent value="meta" className="min-h-72"><MetadataTable branch={b} /></TabsContent>
         </Tabs>
-        <DialogFooter className="gap-2 sm:justify-between">
-          <div className="flex gap-1">
+        <DialogFooter className="flex-wrap gap-2 sm:justify-between">
+          <div className="flex flex-wrap gap-1">
             <Button variant="ghost" onClick={() => p.say("Copied " + b)}><Copy className="size-4" /> Copy name</Button>
             <Button variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={!!blocker} title={blocker ? `Can't archive: ${blocker}` : undefined} onClick={() => { onClose(); p.openFlow({ kind: "archive-branch", branch: b }) }}><Archive className="size-4" /> Archive…</Button>
             <Button variant="ghost" onClick={() => reset()}><Undo2 className="size-4" /> Reset…</Button>
           </div>
-          <div className="flex gap-2">
+          <div className="ml-auto flex gap-2">
             <Button variant="outline" onClick={onClose}>Close</Button>
             <Button disabled={b === p.branch} onClick={() => onSwitch(b)}>Switch to this branch</Button>
           </div>
@@ -508,8 +511,8 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
               <dt className="text-zinc-500">Size</dt><dd>{file.size}</dd>
               <dt className="text-zinc-500">Status</dt><dd>{file.change ? <ChangeBadge file={file} /> : "unchanged"}</dd>
               <dt className="text-zinc-500">Lock</dt>
-              <dd className="flex items-center gap-1.5">{file.lock ? <><LockIcon file={file} /> {file.lock.by === "you" ? "Locked by you" : `Locked by ${file.lock.by}`} on {lockBranch(file.lock)}</> : "Not locked"}</dd>
-              <dt className="text-zinc-500">Last revision</dt><dd>{fileMeta(file).rev ? <code>{fileMeta(file).rev}</code> : <span className="text-amber-700">working copy</span>}</dd>
+              <dd className="flex flex-wrap items-center gap-x-1.5">{file.lock ? <><LockIcon file={file} /> {file.lock.by === "you" ? "Locked by you" : `Locked by ${file.lock.by}`} on <BranchLink name={lockBranch(file.lock)} /></> : "Not locked"}</dd>
+              <dt className="text-zinc-500">Last revision</dt><dd>{fileMeta(file).rev ? <RevLink id={fileMeta(file).rev!} /> : <span className="text-amber-700">working copy</span>}</dd>
               <dt className="text-zinc-500">Modified</dt><dd>{formatWhen(fileMeta(file).at, dev)}</dd>
               {dev && <><dt className="text-zinc-500">Content hash</dt><dd><code>blake3 9a1f…c03e</code></dd></>}
             </dl>
@@ -535,7 +538,7 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
                     <RevisionMenu key={r.id} rev={rev}>
                       <li className="relative rounded py-1 hover:bg-zinc-100">
                         <span className="absolute -left-[17px] top-2 size-2 rounded-full bg-zinc-400" />
-                        <div className="truncate text-zinc-900">{r.message}</div>
+                        <RevLink id={r.id} className="block max-w-full truncate">{r.message}</RevLink>
                         <div className="text-zinc-500">{r.author} · {formatWhen(r.at, dev)}{dev && <> · <code>{r.id}</code></>}</div>
                       </li>
                     </RevisionMenu>
@@ -553,7 +556,7 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
 function StagingTab() {
   const p = useProto()
   const dev = p.mode === "developer"
-  const [msg, setMsg] = useState("")
+  const [msg, setMsg] = useState<CommitMsg>(EMPTY_MSG)
   const [selected, setSelected] = useState<string | null>(null)
   const changed = p.files.filter((f) => f.change)
   const staged = changed.filter((f) => f.staged)
@@ -561,7 +564,7 @@ function StagingTab() {
   const blocked = changed.some((f) => f.lock && f.lock.by !== "you")
   const ticked = changed.filter((f) => f.ticked).length
   const toCommit = dev ? staged.length : ticked
-  const needMsg = !msg.trim()
+  const needMsg = !msgReady(msg)
   // Artist Mode with nothing ticked but local Commits waiting: the button becomes Push and the message box isn't used.
   const pushOnly = !dev && !ticked && p.unpushed > 0
   const selectedFile = p.files.find((f) => f.path === selected)
@@ -600,12 +603,14 @@ function StagingTab() {
           )}
         </div>
         <div className="space-y-2 border-t pt-3">
-          <Textarea
+          <CommitMessageFields
+            idPrefix="staging"
             value={msg}
-            onChange={(e) => setMsg(e.target.value)}
+            onChange={setMsg}
             disabled={pushOnly}
-            placeholder={pushOnly ? `Nothing ticked: Push sends your ${p.unpushed === 1 ? "Commit with its own message" : `${p.unpushed} Commits with their own messages`}` : dev ? "Commit message (required)" : "What did you change? (required)"}
-            className={cn("min-h-16 resize-none", dev && "font-mono text-xs")}
+            compact
+            summaryPlaceholder={pushOnly ? `Nothing ticked: Push sends your ${p.unpushed === 1 ? "Commit with its own summary" : `${p.unpushed} Commits with their own summaries`}` : dev ? "Short summary of the change" : "What did you change?"}
+            descriptionPlaceholder={pushOnly ? "" : undefined}
           />
           <div className="flex items-center gap-2">
             {p.unpushed > 0 && <span className="text-xs text-zinc-500">{p.unpushed} local Commit{p.unpushed > 1 ? "s" : ""} not pushed · locks kept until you push</span>}
@@ -613,14 +618,14 @@ function StagingTab() {
               <Button
                 variant={dev ? "default" : "outline"}
                 disabled={!toCommit || needMsg}
-                title={!toCommit ? (dev ? "Stage files first" : "Tick files first") : needMsg ? "Write a commit message first" : "Record a Commit on this computer only"}
-                onClick={() => { p.commit(msg); setMsg("") }}
+                title={!toCommit ? (dev ? "Stage files first" : "Tick files first") : needMsg ? "Write a summary and a description first" : "Record a Commit on this computer only"}
+                onClick={() => { p.commit(msg); setMsg(EMPTY_MSG) }}
               >{dev ? `Commit (${staged.length})` : "Commit"}</Button>
               {!dev && (
                 <Button
                   disabled={blocked || (ticked ? needMsg : !p.unpushed)}
-                  title={blocked ? "Someone else holds a lock on one of these files" : ticked && needMsg ? "Write a commit message first" : undefined}
-                  onClick={() => { p.commitAndPush(msg); setMsg("") }}
+                  title={blocked ? "Someone else holds a lock on one of these files" : ticked && needMsg ? "Write a summary and a description first" : undefined}
+                  onClick={() => { p.commitAndPush(msg); setMsg(EMPTY_MSG) }}
                 >{ticked ? `Commit & Push (${ticked} file${ticked === 1 ? "" : "s"})` : p.unpushed ? `Push (${p.unpushed} commit${p.unpushed === 1 ? "" : "s"})` : "Commit & Push"}</Button>
               )}
             </div>
@@ -651,15 +656,17 @@ function ScanBar() {
   )
 }
 
-type HistoryEntry = { id: string; message: string; author: string; when: string; files: number; local?: boolean; at: number }
+type HistoryEntry = { id: string; message: string; description?: string; author: string; when: string; files: number; local?: boolean; at: number; branch?: string; parents?: string[] }
 
-const OLDER_HISTORY: HistoryEntry[] = [
-  { id: "d1e4b6a0", message: "Footstep variations for gravel", author: "Sam", when: "", files: 9, at: NOW - 5 * DAY },
-  { id: "8c72fe31", message: "Hero turnaround sheet", author: "Ana", when: "", files: 3, at: NOW - 9 * DAY },
-  { id: "3a90f1b2", message: "Project setup for vertical slice", author: "Marco", when: "", files: 112, at: NOW - 16 * DAY },
-  { id: "b07a9d52", message: "Placeholder UI icons", author: "You", when: "", files: 24, at: NOW - 33 * DAY },
-  { id: "c55d0e7a", message: "Initial import", author: "Marco", when: "", files: 2048, at: NOW - 64 * DAY },
-]
+/** A commit made or synced in this session (not in the mock graph). */
+const isSession = (r: { local?: boolean; when: string }) => !!r.local || r.when.startsWith("just now")
+
+/** Commits reachable from a branch's head in the mock graph, newest first. A branch with no commits of its own shows main's. */
+function graphHistory(b: string): HistoryEntry[] {
+  const head = GRAPH_COMMITS.find((cm) => cm.branch === b) ?? GRAPH_COMMITS.find((cm) => cm.branch === "main")!
+  const keep = ancestors(GRAPH_COMMITS, head.id)
+  return GRAPH_COMMITS.filter((cm) => keep.has(cm.id))
+}
 
 // A long-running branch, so History has enough commits to page through.
 const LONG_BRANCH = "art/character-pass-2"
@@ -675,7 +682,7 @@ const LONG_HISTORY: HistoryEntry[] = Array.from({ length: 137 }, (_, i) => ({
   at: NOW - 3 * HOUR - i * 9 * HOUR,
 }))
 
-type HistorySortKey = "message" | "author" | "when" | "revision"
+type HistorySortKey = "message" | "description" | "author" | "when" | "revision"
 const PAGE_SIZES = [25, 50, 100]
 
 /** Page numbers to show: all when few, otherwise first, last and a window around the current page. */
@@ -704,11 +711,11 @@ function HistoryTab() {
   const [pageSize, setPageSize] = useState(25)
   const isCurrent = viewBranch === p.branch
   // Commits made in this session belong to the current branch only.
-  const session: HistoryEntry[] = isCurrent ? p.history.filter((r) => r.local || r.when === "just now").map((r) => ({ ...r, at: NOW - 60_000 })) : []
-  const base: HistoryEntry[] = viewBranch === LONG_BRANCH
-    ? LONG_HISTORY
-    : [...p.history.filter((r) => !(r.local || r.when === "just now")).map((r) => ({ ...r, at: FILE_REVS.find((f) => f.id === r.id)?.at ?? NOW })), ...OLDER_HISTORY]
-  const entries = [...session, ...base]
+  const historyFor = (b: string): HistoryEntry[] => [
+    ...(b === p.branch ? p.history.filter(isSession).map((r, i) => ({ ...r, at: NOW - 60_000 * (i + 1), branch: b })) : []),
+    ...(b === LONG_BRANCH ? LONG_HISTORY : graphHistory(b)),
+  ]
+  const entries = historyFor(viewBranch)
   const authors = [...new Set(entries.map((e) => e.author))].sort()
   const q = query.trim().toLowerCase()
   const dateActive = !(date.kind === "preset" && date.preset === "any")
@@ -716,20 +723,42 @@ function HistoryTab() {
   const sign = sort.dir === "asc" ? 1 : -1
   const cmp: Record<HistorySortKey, (a: HistoryEntry, b: HistoryEntry) => number> = {
     message: (a, b) => a.message.localeCompare(b.message),
+    description: (a, b) => descriptionOf(a).localeCompare(descriptionOf(b)),
     author: (a, b) => a.author.localeCompare(b.author) || b.at - a.at,
     when: (a, b) => a.at - b.at,
     revision: (a, b) => a.id.localeCompare(b.id),
   }
   const shown = entries
-    .filter((e) => (!q || e.message.toLowerCase().includes(q) || e.id.startsWith(q)) && (author === "any" || e.author === author) && matchesDate(date, e.at))
+    .filter((e) => (!q || e.message.toLowerCase().includes(q) || descriptionOf(e).toLowerCase().includes(q) || e.id.startsWith(q)) && (author === "any" || e.author === author) && matchesDate(date, e.at))
     .sort((a, b) => cmp[sort.key](a, b) * sign)
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize))
   const cur = Math.min(page, pageCount - 1)
   const pageRows = shown.slice(cur * pageSize, (cur + 1) * pageSize)
   useEffect(() => setPage(0), [viewBranch, query, author, date, sort, pageSize])
+  // A revision link elsewhere: show its branch, clear filters, then (next effect) page to it and select it.
+  const [jump, setJump] = useState<string | null>(null)
+  useEffect(() => {
+    const n = p.nav
+    if (!n || n.kind !== "revision") return
+    p.doneNav()
+    const has = (b: string) => historyFor(b).some((e) => e.id === n.id)
+    const home = [viewBranch, n.branch, p.branch, GRAPH_COMMITS.find((cm) => cm.id === n.id)?.branch, LONG_HISTORY.some((e) => e.id === n.id) ? LONG_BRANCH : undefined].find((b) => b && has(b))
+    if (!home) return p.say(`Revision ${n.id} isn't in this project's history`)
+    setViewBranch(home); setQuery(""); setAuthor("any"); setDate({ kind: "preset", preset: "any" }); setSort({ key: "when", dir: "desc" })
+    setJump(n.id)
+  }, [p.nav?.seq])
+  useEffect(() => {
+    if (!jump) return
+    const i = shown.findIndex((e) => e.id === jump)
+    setJump(null)
+    if (i < 0) return
+    setPage(Math.floor(i / pageSize))
+    setSelected(shown[i].id + shown[i].at)
+    requestAnimationFrame(() => document.querySelector(`[data-rev="${jump}"]`)?.scrollIntoView({ block: "center" }))
+  }, [jump, shown])
   const listRef = useRef<HTMLDivElement>(null)
   const goTo = (n: number) => { setPage(n); listRef.current?.scrollTo({ top: 0 }) }
-  const grid = dev ? "grid-cols-[minmax(8rem,1fr)_5.5rem_8rem_5.5rem] gap-x-2" : "grid-cols-[minmax(8rem,1fr)_5.5rem_7rem] gap-x-2"
+  const grid = dev ? "grid-cols-[minmax(8rem,1fr)_minmax(8rem,1.3fr)_5.5rem_8rem_5.5rem] gap-x-3" : "grid-cols-[minmax(8rem,1fr)_minmax(8rem,1.3fr)_5.5rem_7rem] gap-x-3"
   const selectedEntry = shown.find((e) => e.id + e.at === selected)
   const branchOptions = BRANCHES.includes(p.branch) ? BRANCHES : [...BRANCHES, p.branch]
   return (
@@ -746,7 +775,7 @@ function HistoryTab() {
         </Select>
         <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search messages or revision ID…" className="h-8 pl-8 pr-8" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search summaries, descriptions or revision ID…" className="h-8 pl-8 pr-8" />
           {query && <button aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-900" onClick={() => setQuery("")}><X className="size-3.5" /></button>}
         </div>
         <div className="relative">
@@ -769,7 +798,8 @@ function HistoryTab() {
       </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-auto rounded-lg border">
         <div className={cn("sticky top-0 z-10 grid border-b bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-500", grid)}>
-          <SortHeader label="Message" k="message" sort={sort} onSort={setSort} />
+          <SortHeader label="Summary" k="message" sort={sort} onSort={setSort} />
+          <SortHeader label="Description" k="description" sort={sort} onSort={setSort} />
           <SortHeader label="Author" k="author" sort={sort} onSort={setSort} />
           <SortHeader label="When" k="when" sort={sort} onSort={setSort} firstDir="desc" />
           {dev && <SortHeader label="Revision" k="revision" sort={sort} onSort={setSort} />}
@@ -780,10 +810,12 @@ function HistoryTab() {
           return (
             <RevisionMenu key={key} rev={r}>
               <button
+                data-rev={r.id}
                 onClick={() => setSelected(isSel ? null : key)}
                 className={cn("grid w-full items-center border-b px-3 py-2 text-left text-sm last:border-b-0", isSel ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50", grid)}
               >
                 <span className="truncate">{r.message} {r.local && <Badge variant="outline" className="ml-1 font-normal">not pushed</Badge>}</span>
+                <span className="truncate text-zinc-500" title={descriptionOf(r)}>{descriptionOf(r)}</span>
                 <span className="truncate text-zinc-600">{r.author}</span>
                 <span className="text-zinc-500">{formatWhen(r.at, dev)}</span>
                 {dev && <code className="text-xs text-zinc-400">{r.id}</code>}
@@ -823,7 +855,9 @@ function HistoryTab() {
 function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undefined; branch?: string; onClose: () => void }) {
   const p = useProto()
   const dev = p.mode === "developer"
-  const files = entry ? changedFilesFor(entry) : []
+  const files = entry ? revisionFiles(entry) : []
+  const PANEL_FILES = 5
+  const home = branch ?? entry?.branch ?? p.branch
   return (
     <DetailsPanel open={!!entry}>
       {entry && (
@@ -840,9 +874,11 @@ function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undef
             <dl className="grid grid-cols-[6rem_1fr] gap-y-1.5">
               <dt className="text-zinc-500">Author</dt><dd>{entry.author}{dev && ` <${entry.author.toLowerCase()}@studio.local>`}</dd>
               <dt className="text-zinc-500">Date</dt><dd>{new Date(entry.at).toISOString().slice(0, 16).replace("T", " ")}</dd>
-              <dt className="text-zinc-500">Branch</dt><dd>{branch ?? p.branch}</dd>
-              <dt className="text-zinc-500">Revision</dt><dd><code>{dev ? `${entry.id}c41e09ab77f3d2e1` : entry.id}</code></dd>
-              {dev && <><dt className="text-zinc-500">Parent</dt><dd><code>71cc9b20a8e4…</code></dd><dt className="text-zinc-500">Metadata</dt><dd><code>change-request: none</code></dd></>}
+              <dt className="text-zinc-500">Description</dt><dd className="whitespace-pre-wrap">{descriptionOf(entry)}</dd>
+              <dt className="text-zinc-500">Branch</dt><dd><BranchLink name={home} /></dd>
+              <dt className="text-zinc-500">Revision</dt><dd><RevLink id={entry.id} branch={home}><code>{dev ? `${entry.id}c41e09ab77f3d2e1` : entry.id}</code></RevLink></dd>
+              {entry.parents?.length ? <><dt className="text-zinc-500">{entry.parents.length > 1 ? "Parents" : "Parent"}</dt><dd className="flex flex-wrap gap-x-2">{entry.parents.map((id) => <RevLink key={id} id={id} />)}</dd></> : null}
+              {dev && <><dt className="text-zinc-500">Metadata</dt><dd><code>change-request: none</code></dd></>}
               {entry.local && <><dt className="text-zinc-500">Status</dt><dd className="text-amber-700">Not pushed yet</dd></>}
             </dl>
             <div className="flex flex-wrap gap-1.5">
@@ -853,17 +889,22 @@ function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undef
             <div>
               <div className="mb-1.5 font-medium uppercase text-zinc-500">Files changed ({entry.files})</div>
               <div className="rounded-md border bg-white">
-                {files.map((f) => (
+                {files.slice(0, PANEL_FILES).map((f) => (
                   <FileMenu key={f.path} file={f}>
-                    <div className="flex cursor-pointer items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0 hover:bg-zinc-50" title="Show what changed" onClick={() => p.openFlow(revisionDiff(entry, f.path))}>
+                    <div className="group flex items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0 hover:bg-zinc-50">
                       <FileTypeIcon path={f.path} />
-                      <span className={cn("min-w-0 flex-1 truncate", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</span>
+                      <FileLink path={f.path} className={cn("flex-1", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</FileLink>
                       <LockIcon file={f} />
+                      <button className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900" title="Show what changed" aria-label={`Show what changed in ${fileName(f.path)}`} onClick={() => p.openFlow(revisionDiff(entry, f.path))}><FileDiff className="size-3.5" /></button>
                     </div>
                   </FileMenu>
                 ))}
-                {entry.files > files.length && <div className="px-2 py-1.5 text-zinc-400">+ {entry.files - files.length} more</div>}
               </div>
+              {files.length > PANEL_FILES && (
+                <Button size="sm" variant="outline" className="mt-1.5 h-7 w-full text-xs" onClick={() => p.openFlow({ kind: "commit-info", revision: { ...entry, description: descriptionOf(entry) }, branch: home })}>
+                  Show more ({files.length - PANEL_FILES} more file{files.length - PANEL_FILES === 1 ? "" : "s"})
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -992,7 +1033,7 @@ function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: 
     const meta = fileMeta(f)
     return (
       <FileMenu file={f}>
-        <div onClick={() => onSelect(f.path)} onDoubleClick={() => openDiff(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
+        <div data-path={f.path} onClick={() => onSelect(f.path)} onDoubleClick={() => openDiff(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
           {/* Same width as a folder's chevron, so a file's icon lines up with sibling folders' icons. */}
           <span aria-hidden className="w-3.5 shrink-0" />
           <FileTypeIcon path={f.path} />
@@ -1104,6 +1145,17 @@ function ExplorerTab() {
   const allOpen = filtering || allFolders.every((f) => open.has(f))
   const [selected, setSelected] = useState<string | null>(null)
   const selectedFile = all.find((f) => f.path === selected)
+  // A file link elsewhere: clear filters, open its folders, select it and scroll to it.
+  useEffect(() => {
+    const n = p.nav
+    if (!n || n.kind !== "file") return
+    p.doneNav()
+    setQuery(""); setDateFilter({ kind: "preset", preset: "any" }); setRevFilter("any"); setLockOn(false)
+    const parts = n.id.split("/")
+    setOpen((s) => new Set([...s, ...parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"))]))
+    setSelected(n.id)
+    requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector(`[data-path="${CSS.escape(n.id)}"]`)?.scrollIntoView({ block: "center" })))
+  }, [p.nav?.seq])
   return (
     <div className="flex h-full">
     <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
@@ -1742,7 +1794,10 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
   const [hover, setHover] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [hoverCommit, setHoverCommit] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [hit, setHit] = useState(0)
   const canvasRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Heads: the newest commit on each branch. A branch made in this session (no commits yet) points at where main is.
   const base = GRAPH_COMMITS.map((cm) => ({ ...cm }))
@@ -1751,7 +1806,7 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
   const branch = p.branch
   if (!heads.has(branch)) heads.set(branch, heads.get("main")!)
   // Commits made in this session sit on top of the current branch.
-  const fresh = p.history.filter((r) => r.local || r.when === "just now")
+  const fresh = p.history.filter(isSession)
   const extra: GraphCommit[] = fresh.map((r, i) => ({ ...r, at: NOW - 60_000 * (i + 1), branch, parents: [] }))
   extra.forEach((cm, i) => { cm.parents = [extra[i + 1]?.id ?? heads.get(branch)!] })
   if (extra.length) heads.set(branch, extra[0].id)
@@ -1768,6 +1823,20 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
   const selectedEntry = commits.find((cm) => cm.id === selected && !cm.working)
   const branchCount = new Set(commits.map((cm) => cm.branch)).size
   const pick = (cm: GraphCommit) => { if (cm.working) onOpenStaging(); else setSelected(selected === cm.id ? null : cm.id) }
+  // Search doesn't filter the graph: it finds matching commits and takes you to them one at a time.
+  const sq = search.trim().toLowerCase()
+  const matches = sq ? commits.filter((cm) => !cm.working && (cm.message.toLowerCase().includes(sq) || descriptionOf(cm).toLowerCase().includes(sq) || cm.id.startsWith(sq) || cm.author.toLowerCase().includes(sq))) : []
+  const matchIds = new Set(matches.map((cm) => cm.id))
+  const goToHit = (n: number) => {
+    if (!matches.length) return
+    const k = ((n % matches.length) + matches.length) % matches.length
+    setHit(k)
+    const cm = matches[k]
+    setSelected(cm.id)
+    const box = scrollRef.current
+    if (box) box.scrollTo({ top: Math.max(0, commits.indexOf(cm) * ROW_H - box.clientHeight / 2 + ROW_H), behavior: "smooth" })
+  }
+  useEffect(() => { if (sq) goToHit(0); else setHit(0) }, [sq, scope])
   const hoverAt = (b: string, el: Element) => {
     const r = el.getBoundingClientRect(), c = canvasRef.current!.getBoundingClientRect()
     setHover({ branch: b, x: r.right - c.left - 10, y: r.top - c.top + r.height / 2 })
@@ -1783,10 +1852,40 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
             ))}
           </div>
           <span className="text-xs text-zinc-500">{commits.length - working.length} commits · {branchCount} branch{branchCount === 1 ? "" : "es"}</span>
-          <span className="ml-auto text-xs text-zinc-400">Hover a line, dot or branch tag for details</span>
+          <div className="relative ml-auto w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === "ArrowDown") { e.preventDefault(); goToHit(hit + (e.shiftKey ? -1 : 1)) }
+                if (e.key === "ArrowUp") { e.preventDefault(); goToHit(hit - 1) }
+                if (e.key === "Escape") setSearch("")
+              }}
+              placeholder="Find a commit: summary, ID, author…"
+              aria-label="Find a commit"
+              className={cn("h-8 pl-8", sq ? "pr-28" : "pr-2")}
+            />
+            {sq && (
+              <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 text-xs text-zinc-500">
+                <span className={cn("px-1 tabular-nums", !matches.length && "text-red-600")}>{matches.length ? `${hit + 1} of ${matches.length}` : "No match"}</span>
+                <button aria-label="Previous match" title="Previous match (Shift+Enter)" disabled={!matches.length} className="rounded p-0.5 hover:bg-zinc-100 disabled:opacity-40" onClick={() => goToHit(hit - 1)}><ArrowUp className="size-3.5" /></button>
+                <button aria-label="Next match" title="Next match (Enter)" disabled={!matches.length} className="rounded p-0.5 hover:bg-zinc-100 disabled:opacity-40" onClick={() => goToHit(hit + 1)}><ArrowDown className="size-3.5" /></button>
+                <button aria-label="Clear search" className="rounded p-0.5 hover:bg-zinc-100" onClick={() => setSearch("")}><X className="size-3.5" /></button>
+              </span>
+            )}
+          </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
-          <div ref={canvasRef} className="relative" style={{ height, minWidth: graphW + (dev ? 520 : 450) }}>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto rounded-lg border">
+          <div style={{ minWidth: graphW + 540 }}>
+          <div className="sticky top-0 z-20 flex h-8 items-center gap-3 border-b bg-zinc-50 pr-3 text-[11px] font-medium uppercase text-zinc-500" style={{ paddingLeft: graphW + 4 }}>
+            <span className="absolute left-3">Graph</span>
+            <span className="min-w-48 flex-1">Summary</span>
+            <span className="w-20 shrink-0">Revision</span>
+            <span className="w-24 shrink-0">Author</span>
+            <span className="w-24 shrink-0">When</span>
+          </div>
+          <div ref={canvasRef} className="relative" style={{ height }}>
             <svg className="pointer-events-none absolute left-0 top-0 z-10" width={graphW} height={height} onMouseLeave={() => setHover(null)}>
               {edges.map((e, i) => {
                 const dim = hover && hover.branch !== e.branch
@@ -1842,8 +1941,9 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
                   onClick={() => pick(cm)}
                   onMouseEnter={() => setHoverCommit(cm.id)}
                   onMouseLeave={() => setHoverCommit(null)}
+                  data-rev={cm.id}
                   title={cm.working ? "Open in Staging" : undefined}
-                  className={cn("group absolute left-0 right-0 flex items-center gap-3 border-b pr-3 text-left text-sm", isSel ? "bg-sky-50" : "hover:bg-zinc-50")}
+                  className={cn("group absolute left-0 right-0 flex items-center gap-3 border-b pr-3 text-left text-sm", isSel ? "bg-sky-50 ring-1 ring-inset ring-sky-300" : matchIds.has(cm.id) ? "bg-amber-50 hover:bg-amber-100/70" : "hover:bg-zinc-50")}
                   style={{ top: i * ROW_H, height: ROW_H, paddingLeft: graphW + 4 }}
                 >
                   <span className="flex min-w-48 flex-1 items-center gap-1.5 overflow-hidden">
@@ -1865,18 +1965,19 @@ function GraphTab({ onOpenStaging }: { onOpenStaging: () => void }) {
                   </span>
                   {!cm.working && (
                     <>
+                      <code className="w-20 shrink-0 text-xs text-zinc-500">{cm.id}</code>
                       <span className="flex w-24 shrink-0 items-center gap-1.5 text-zinc-600">
                         <span className="grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold text-white" style={{ background: branchColor(cm.author) }}>{cm.author.slice(0, 2).toUpperCase()}</span>
                         <span className="truncate text-xs">{cm.author}</span>
                       </span>
                       <span className="w-24 shrink-0 text-xs text-zinc-500">{formatWhen(cm.at, dev)}</span>
-                      {dev && <code className="w-16 shrink-0 text-xs text-zinc-400">{cm.id}</code>}
                     </>
                   )}
                 </button>
               )
               return cm.working ? rowEl : <RevisionMenu key={cm.id} rev={cm}>{rowEl}</RevisionMenu>
             })}
+          </div>
           </div>
         </div>
       </div>
@@ -1979,6 +2080,8 @@ export function VariantD() {
     }
     const onFocus = () => { if (p.autoScan) p.scan("auto") }
     const onCmd = (e: Event) => { const d = (e as CustomEvent<{ type: string; value?: string }>).detail; if (d.type === "tab") setTab(d.value as TabKey) }
+    if (p.nav?.kind === "revision" && tab !== "history") setTab("history")
+    if (p.nav?.kind === "file" && tab !== "explorer") setTab("explorer")
     window.addEventListener("keydown", onKey)
     window.addEventListener("focus", onFocus)
     window.addEventListener("scribe:command", onCmd)

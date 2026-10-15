@@ -1,6 +1,6 @@
 // PROTOTYPE: dialogs for the core Lore flows (diff, merge, sync, switch, locks). Opened from anywhere via p.openFlow().
 // Every option maps to a real `lore` flag (docs/reference/lore-cli-commands.md); Developer Mode shows the equivalent command.
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowRight, CircleAlert, Columns2, Eye, GitBranch, GitMerge, Lock, LockOpen, Rows3, SplitSquareHorizontal, TriangleAlert, Undo2 } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowRight, CircleAlert, Columns2, Eye, FileDiff, GitBranch, GitMerge, Lock, LockOpen, Rows3, Search, SplitSquareHorizontal, TriangleAlert, Undo2, X } from "lucide-react"
 import { Fragment, useMemo, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -12,8 +12,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { FileTypeIcon } from "./fileTypes"
-import { ChangeBadge, Thumb, archiveBlocker } from "./shared"
-import { BRANCHES, INCOMING, allFiles, fileName, lockBranch, useProto, type FileEntry, type Flow } from "./state"
+import { BranchLink, ChangeBadge, CommitMessageFields, FileLink, RevLink, Thumb, archiveBlocker } from "./shared"
+import { BRANCHES, EMPTY_MSG, INCOMING, allFiles, cliMsg, descriptionOf, fileName, lockBranch, msgReady, revisionDiff, revisionFiles, useProto, type CommitMsg, type FileEntry, type Flow } from "./state"
 
 /** The equivalent Lore command, shown in Developer Mode only. */
 export function Cli({ children, className }: { children: ReactNode; className?: string }) {
@@ -324,7 +324,7 @@ function DiffDialog({ flow }: { flow: Extract<Flow, { kind: "diff" }> }) {
   const flags = [source !== "current" && `--source ${source === "parent" ? `${rev?.id}~1` : source}`, target !== "working" && `--target ${target}`, ctx !== 3 && `-U ${ctx}`, ws.eol && "--ignore-space-at-eol", ws.change && "--ignore-space-change", diff3 && "--diff3"].filter(Boolean).join(" ")
   const opt = "flex items-center gap-1.5 text-xs font-normal"
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
+    <Dialog open onOpenChange={(o) => { if (!o) { if (flow.back) p.openFlow(flow.back); else p.closeFlow() } }}>
       <DialogContent className="flex h-[85vh] max-h-[48rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[72rem]">
         <DialogHeader className="border-b px-5 py-3 text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
@@ -406,7 +406,7 @@ function DiffDialog({ flow }: { flow: Extract<Flow, { kind: "diff" }> }) {
           <div className="ml-auto flex items-center gap-2">
             {file.change && <ChangeBadge file={file} />}
             <Button variant="outline" size="sm" onClick={() => p.say(`Opened ${fileName(file.path)} in its default app`)}>Open file</Button>
-            <Button size="sm" onClick={p.closeFlow}>Close</Button>
+            <Button size="sm" onClick={() => (flow.back ? p.openFlow(flow.back) : p.closeFlow())}>{flow.back ? "Back" : "Close"}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -429,7 +429,7 @@ function MergeDialog({ flow }: { flow: Extract<Flow, { kind: "merge" }> }) {
   const p = useProto()
   const dev = p.mode === "developer"
   const [source, target] = flow.into ? [p.branch, flow.branch] : [flow.branch, p.branch]
-  const [message, setMessage] = useState(`Merge ${source} into ${target}`)
+  const [message, setMessage] = useState<CommitMsg>({ summary: `Merge ${source} into ${target}`, description: "" })
   const [auto, setAuto] = useState(true)
   const [noCommit, setNoCommit] = useState(false)
   const [meta, setMeta] = useState("")
@@ -439,7 +439,7 @@ function MergeDialog({ flow }: { flow: Extract<Flow, { kind: "merge" }> }) {
   const conflicts = auto ? d.conflicts.filter((c) => !c.endsWith(".md")) : d.conflicts
   const autoFixed = d.conflicts.length - conflicts.length
   const dirty = p.files.filter((f) => f.change).length
-  const flags = [!flow.into && `--message ${q(message)}`, !flow.into && noCommit && "--no-commit", meta && meta.split(/[,\s]+/).filter(Boolean).map((k) => `--inherit-metadata ${k}`).join(" "), links === "main" && "--ignore-links"].filter(Boolean).join(" ")
+  const flags = [!flow.into && `--message ${cliMsg(message)}`, !flow.into && noCommit && "--no-commit", meta && meta.split(/[,\s]+/).filter(Boolean).map((k) => `--inherit-metadata ${k}`).join(" "), links === "main" && "--ignore-links"].filter(Boolean).join(" ")
   return (
     <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-auto sm:max-w-xl">
@@ -469,8 +469,8 @@ function MergeDialog({ flow }: { flow: Extract<Flow, { kind: "merge" }> }) {
             <Cli className="mt-2">lore branch diff {target} --source {source}{auto ? " --auto-resolve" : ""}</Cli>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="merge-msg">{flow.into ? "Commit message" : "Commit message (used when there are no conflicts)"}</Label>
-            <Input id="merge-msg" value={message} onChange={(e) => setMessage(e.target.value)} className={cn(dev && "font-mono text-xs")} />
+            <div className="font-medium">Merge commit{!flow.into && <span className="font-normal text-zinc-500"> (also used after you resolve conflicts)</span>}</div>
+            <CommitMessageFields idPrefix="merge" value={message} onChange={setMessage} compact descriptionPlaceholder="What this merge brings in, and anything to check afterwards" />
           </div>
           {dev && (
             <div className="grid grid-cols-[9rem_1fr] items-center gap-x-3 gap-y-2 text-xs">
@@ -496,13 +496,13 @@ function MergeDialog({ flow }: { flow: Extract<Flow, { kind: "merge" }> }) {
               {d.changed - conflicts.length} files would update cleanly{autoFixed ? `, ${autoFixed} combined automatically` : ""}, {conflicts.length} would need a decision. {flow.into ? `A merge commit would land on ${target}.` : noCommit ? "Nothing would be committed." : "A merge commit would be made locally (not pushed)."}
             </div>
           )}
-          <Cli>{flow.into ? `lore branch merge into ${target} ${q(message)}${flags ? " " + flags : ""}` : `lore branch merge start ${source} ${flags}${preview ? " --dry-run" : ""}`}</Cli>
+          <Cli>{flow.into ? `lore branch merge into ${target} ${cliMsg(message)}${flags ? " " + flags : ""}` : `lore branch merge start ${source} ${flags}${preview ? " --dry-run" : ""}`}</Cli>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" onClick={() => setPreview(true)}><Eye className="size-4" /> Preview</Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
-            <Button disabled={!message.trim()} onClick={() => p.merge(flow.branch, flow.into, { message, noCommit, conflicts })}>{conflicts.length && !flow.into ? "Merge and resolve…" : "Merge"}</Button>
+            <Button disabled={!msgReady(message)} title={msgReady(message) ? undefined : "Write a summary and a description first"} onClick={() => p.merge(flow.branch, flow.into, { message, noCommit, conflicts })}>{conflicts.length && !flow.into ? "Merge and resolve…" : "Merge"}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -623,18 +623,18 @@ function SyncConflictDialog({ flow }: { flow: Extract<Flow, { kind: "sync-confli
   const dev = p.mode === "developer"
   const n = flow.paths.length
   const [choice, setChoice] = useState<"merge" | "reset" | "forward" | "branch">("merge")
-  const [message, setMessage] = useState("")
+  const [message, setMessage] = useState<CommitMsg>(EMPTY_MSG)
   const [copy, setCopy] = useState(true)
   const [branchName, setBranchName] = useState(`${p.branch === "main" ? "art" : p.branch.split("/")[0]}/my-${fileName(flow.paths[0]).replace(/\..+$/, "").replace(/_/g, "-")}`)
   const needsMsg = choice === "merge" || choice === "branch"
   const nameTaken = p.branches.includes(branchName.trim())
-  const ok = (!needsMsg || message.trim()) && (choice !== "branch" || (branchName.trim() && !nameTaken))
+  const ok = (!needsMsg || msgReady(message)) && (choice !== "branch" || (branchName.trim() && !nameTaken))
   const radio = "flex items-start gap-2 rounded-md border p-2.5 font-normal has-[[data-state=checked]]:border-zinc-900"
   const cli = {
-    merge: [`lore commit ${q(message.trim() || "<message>")} ${flow.paths.map(q).join(" ")}`, "lore sync   # merges; conflicts are resolved file by file"],
+    merge: [`lore commit ${cliMsg(message)} ${flow.paths.map(q).join(" ")}`, "lore sync   # merges; conflicts are resolved file by file"],
     reset: [...(copy ? flow.paths.map((x) => `copy ${q(x)} → ${q(x.replace(/(\.[^.]+)$/, ".mine$1"))}`) : []), "lore sync --reset"],
     forward: ["lore sync --forward-changes"],
-    branch: [`lore branch create ${branchName.trim() || "<name>"}`, `lore commit ${q(message.trim() || "<message>")} ${flow.paths.map(q).join(" ")}`],
+    branch: [`lore branch create ${branchName.trim() || "<name>"}`, `lore commit ${cliMsg(message)} ${flow.paths.map(q).join(" ")}`],
   }[choice]
   return (
     <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
@@ -665,12 +665,7 @@ function SyncConflictDialog({ flow }: { flow: Extract<Flow, { kind: "sync-confli
             {nameTaken && <p className="text-xs text-red-600">A branch with this name already exists.</p>}
           </div>
         )}
-        {needsMsg && (
-          <div className="space-y-1">
-            <Label htmlFor="clash-msg" className="text-xs">Commit message (required)</Label>
-            <Input id="clash-msg" autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What did you change?" className={cn("h-8 text-sm", dev && "font-mono text-xs")} />
-          </div>
-        )}
+        {needsMsg && <CommitMessageFields idPrefix="clash" autoFocus compact value={message} onChange={setMessage} />}
         {dev && (
           <div className="space-y-1">
             <code className="block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600">{cli.map((c) => <span key={c} className="block">$ {c}</span>)}</code>
@@ -679,9 +674,70 @@ function SyncConflictDialog({ flow }: { flow: Extract<Flow, { kind: "sync-confli
         )}
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" onClick={() => { p.closeFlow(); p.say("Sync cancelled. Nothing changed") }}>Cancel</Button>
-          <Button disabled={!ok} variant={choice === "reset" ? "destructive" : "default"} onClick={() => p.syncClash(choice, { paths: flow.paths, message: message.trim(), copy, branchName: branchName.trim() })}>
+          <Button disabled={!ok} variant={choice === "reset" ? "destructive" : "default"} onClick={() => p.syncClash(choice, { paths: flow.paths, message, copy, branchName: branchName.trim() })}>
             {{ merge: "Commit and sync", reset: "Replace mine and sync", forward: "Sync the rest", branch: "Move to branch" }[choice]}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------- Commit information
+
+const HOW_TONE = { modified: "text-amber-700", added: "text-emerald-700", deleted: "text-red-700" } as const
+
+/** Everything about one commit, with the full list of files it changed. Opened by "Show more" in a commit panel. */
+function CommitInfoDialog({ flow }: { flow: Extract<Flow, { kind: "commit-info" }> }) {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const r = flow.revision
+  const all = revisionFiles(r)
+  const [query, setQuery] = useState("")
+  const q2 = query.trim().toLowerCase()
+  const shown = q2 ? all.filter((f) => f.path.toLowerCase().includes(q2)) : all
+  const counts = { modified: all.filter((f) => f.how === "modified").length, added: all.filter((f) => f.how === "added").length, deleted: all.filter((f) => f.how === "deleted").length }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
+      <DialogContent className="flex h-[85vh] max-h-[44rem] flex-col gap-3 sm:max-w-2xl">
+        <DialogHeader className="text-left">
+          <DialogTitle className="pr-6">{r.message}</DialogTitle>
+          <DialogDescription className="whitespace-pre-wrap text-zinc-700">{descriptionOf(r)}</DialogDescription>
+        </DialogHeader>
+        <dl className="grid grid-cols-[6rem_1fr_6rem_1fr] gap-x-3 gap-y-1 rounded-md border bg-zinc-50 px-3 py-2 text-xs">
+          <dt className="text-zinc-500">Author</dt><dd>{r.author}</dd>
+          <dt className="text-zinc-500">Branch</dt><dd><BranchLink name={flow.branch} /></dd>
+          <dt className="text-zinc-500">Date</dt><dd>{r.at ? new Date(r.at).toISOString().slice(0, 16).replace("T", " ") : r.when}</dd>
+          <dt className="text-zinc-500">Revision</dt><dd><RevLink id={r.id} branch={flow.branch} /></dd>
+          {r.local && <><dt className="text-zinc-500">Status</dt><dd className="text-amber-700">Not pushed yet</dd></>}
+        </dl>
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+            <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${all.length} files…`} className="h-8 pl-8 pr-8" />
+            {query && <button aria-label="Clear file search" className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-900" onClick={() => setQuery("")}><X className="size-3.5" /></button>}
+          </div>
+          <span className="shrink-0 text-xs text-zinc-500">
+            {q2 ? `${shown.length} of ${all.length}` : `${all.length} files`} · <span className={HOW_TONE.modified}>{counts.modified} modified</span> · <span className={HOW_TONE.added}>{counts.added} added</span> · <span className={HOW_TONE.deleted}>{counts.deleted} deleted</span>
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+          {shown.map((f) => (
+            <div key={f.path} className="group flex items-center gap-2 border-b px-3 py-1.5 text-xs last:border-b-0 hover:bg-zinc-50">
+              <span className={cn("w-4 shrink-0 font-mono font-semibold", HOW_TONE[f.how])} title={f.how}>{f.how[0].toUpperCase()}</span>
+              <FileTypeIcon path={f.path} />
+              <FileLink path={f.path} className={cn("flex-1", dev && "font-mono")}>{dev ? f.path : fileName(f.path)}</FileLink>
+              {!dev && <span className="hidden truncate text-zinc-400 sm:block">{f.path.split("/").slice(0, -1).join(" / ")}</span>}
+              <span className="w-14 shrink-0 text-right tabular-nums text-zinc-400">{f.size}</span>
+              <button className="shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900" title="Show what changed" onClick={() => p.openFlow({ ...revisionDiff(r, f.path), back: flow })}><FileDiff className="size-3.5" /></button>
+            </div>
+          ))}
+          {!shown.length && <p className="px-3 py-4 text-sm text-zinc-400">No files match “{query}”.</p>}
+        </div>
+        {dev && <Cli>lore revision show {r.id} --files</Cli>}
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="outline" onClick={() => p.openFlow({ ...revisionDiff(r), back: flow })}><FileDiff className="size-4" /> Show changes</Button>
+          <Button onClick={p.closeFlow}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -704,14 +760,14 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
   const changed = changedFiles.length
   const clash = switchClash(p.files, flow.branch)
   const [changes, setChanges] = useState<"keep" | "commit" | "reset" | "force">(clash.length ? "commit" : "keep")
-  const [message, setMessage] = useState("")
+  const [message, setMessage] = useState<CommitMsg>(EMPTY_MSG)
   const [copy, setCopy] = useState(true)
   const [local, setLocal] = useState(false)
   const [preview, setPreview] = useState(false)
   const rev = revMode === "latest" ? "latest" : revision.trim()
   const flags = [rev !== "latest" && q(rev), changes === "reset" && "--reset", changes === "force" && "--force", local && "--local"].filter(Boolean).join(" ")
   const radio = "flex items-start gap-2 font-normal"
-  const ok = !!rev && (changes !== "commit" || !!message.trim())
+  const ok = !!rev && (changes !== "commit" || msgReady(message))
   const label = { keep: "Switch", commit: "Commit and switch", reset: "Discard and switch", force: "Switch anyway" }[changes]
   return (
     <Dialog open onOpenChange={(o) => { if (!o) p.closeFlow() }}>
@@ -734,7 +790,7 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
               <RadioGroup value={changes} onValueChange={(v) => setChanges(v as typeof changes)} className="space-y-1.5">
                 {clash.length === 0 && <Label className={radio}><RadioGroupItem value="keep" className="mt-0.5" /> <span>Bring them with me<span className="block text-xs text-zinc-500">They stay uncommitted on {flow.branch}</span></span></Label>}
                 <Label className={radio}><RadioGroupItem value="commit" className="mt-0.5" /> <span>Commit them here first<span className="block text-xs text-zinc-500">A local Commit on {p.branch}, then the switch. Nothing is pushed.</span></span></Label>
-                {changes === "commit" && <Input autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message (required)" className={cn("ml-6 h-8 w-[calc(100%-1.5rem)] text-sm", dev && "font-mono text-xs")} />}
+                {changes === "commit" && <div className="ml-6"><CommitMessageFields idPrefix="switch" autoFocus compact value={message} onChange={setMessage} /></div>}
                 <Label className={radio}><RadioGroupItem value="reset" className="mt-0.5" /> <span>Discard them<span className="block text-xs text-red-600">Files go back to how they are on {flow.branch}</span></span></Label>
                 {changes === "reset" && <Label className="ml-6 text-xs font-normal"><Checkbox checked={copy} onCheckedChange={(v) => setCopy(v === true)} /> Save a copy of mine first</Label>}
                 {dev && clash.length > 0 && <Label className={radio}><RadioGroupItem value="force" className="mt-0.5" /> <span>Bring them anyway<span className="block text-xs text-amber-700">Your versions stay as local changes on top of {flow.branch} (<code>--force</code>). Committing them later replaces {flow.branch}'s versions.</span></span></Label>}
@@ -766,7 +822,7 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
             </div>
           )}
           <code className={cn("block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600", !dev && "hidden")}>
-            {changes === "commit" && <span className="block">$ lore commit {q(message.trim() || "<message>")}</span>}
+            {changes === "commit" && <span className="block">$ lore commit {cliMsg(message)}</span>}
             <span className="block">$ lore branch switch {flow.branch}{flags ? " " + flags : ""}{preview ? " --dry-run" : ""}</span>
           </code>
         </div>
@@ -774,7 +830,7 @@ function SwitchDialog({ flow }: { flow: Extract<Flow, { kind: "switch" }> }) {
           <Button variant="ghost" onClick={() => setPreview(true)}><Eye className="size-4" /> Preview</Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={p.closeFlow}>Cancel</Button>
-            <Button disabled={!ok} variant={changes === "reset" ? "destructive" : "default"} onClick={() => (changes === "commit" ? p.switchCommitFirst(flow.branch, message.trim()) : p.switchBranch(flow.branch, { revision: rev, reset: changes === "reset", force: changes === "force", local, copy: changes === "reset" && copy }))}>{label}</Button>
+            <Button disabled={!ok} variant={changes === "reset" ? "destructive" : "default"} onClick={() => (changes === "commit" ? p.switchCommitFirst(flow.branch, message) : p.switchBranch(flow.branch, { revision: rev, reset: changes === "reset", force: changes === "force", local, copy: changes === "reset" && copy }))}>{label}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -992,6 +1048,7 @@ export function Flows() {
       {f.kind === "archive-branch" && <ArchiveBranchDialog flow={f} />}
       {f.kind === "restore-branch" && <RestoreBranchDialog flow={f} />}
       {f.kind === "reset-branch" && <ResetBranchDialog flow={f} />}
+      {f.kind === "commit-info" && <CommitInfoDialog flow={f} />}
     </Fragment>
   )
 }

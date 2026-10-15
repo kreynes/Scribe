@@ -4,11 +4,14 @@ import { Archive, ArchiveRestore, ArrowDownToLine, FileDiff, GitBranchPlus, GitM
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { LORE_LOG, fileName, lockBranch, lockLabel, revisionDiff, useProto, type ArchivedBranch, type FileEntry, type Revision } from "./state"
+import { LORE_LOG, PROJECT_TREE, fileName, lockBranch, lockLabel, revisionDiff, useProto, type ArchivedBranch, type CommitMsg, type FileEntry, type Revision } from "./state"
 
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
@@ -28,13 +31,38 @@ export function ChangeBadge({ file }: { file: FileEntry }) {
   return <Badge variant="outline" className={cn("font-normal", tone)}>{file.change}</Badge>
 }
 
-function Advanced({ children }: { children: ReactNode }) {
+/** Summary + description for a Commit. Both are required; Lore gets them as one message (see cliMsg). */
+export function CommitMessageFields({ value, onChange, idPrefix = "commit", compact, autoFocus, disabled, summaryPlaceholder, descriptionPlaceholder }: { value: CommitMsg; onChange: (m: CommitMsg) => void; idPrefix?: string; compact?: boolean; autoFocus?: boolean; disabled?: boolean; summaryPlaceholder?: string; descriptionPlaceholder?: string }) {
+  const dev = useProto().mode === "developer"
+  const mono = dev && "font-mono text-xs"
   return (
-    <>
-      {children}
-      <ContextMenuShortcut className="rounded border px-1 text-[10px] tracking-normal">Advanced</ContextMenuShortcut>
-    </>
+    <div className="space-y-1.5">
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-summary`} className="text-xs">Summary <span className="font-normal text-zinc-400">(required)</span></Label>
+        <Input id={`${idPrefix}-summary`} autoFocus={autoFocus} disabled={disabled} value={value.summary} maxLength={120} onChange={(e) => onChange({ ...value, summary: e.target.value })} placeholder={summaryPlaceholder ?? "One line: what changed"} className={cn("h-8 text-sm", mono)} />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-description`} className="text-xs">Description <span className="font-normal text-zinc-400">(required)</span></Label>
+        <Textarea id={`${idPrefix}-description`} disabled={disabled} value={value.description} onChange={(e) => onChange({ ...value, description: e.target.value })} placeholder={descriptionPlaceholder ?? "Why, and anything a teammate should know"} className={cn("resize-none text-sm", compact ? "min-h-14" : "min-h-16", mono)} />
+      </div>
+    </div>
   )
+}
+
+/** Links inside information panels: open the place that shows the thing, with it selected. */
+const LINK = "cursor-pointer text-sky-700 underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+export function RevLink({ id, branch, children, className }: { id: string; branch?: string; children?: ReactNode; className?: string }) {
+  const p = useProto()
+  return <button type="button" title={`Open revision ${id} in History`} className={cn(LINK, "text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "revision", id, branch }) }}>{children ?? <code>{id}</code>}</button>
+}
+export function BranchLink({ name, className }: { name: string; className?: string }) {
+  const p = useProto()
+  return <button type="button" title={`Open Branch information for ${name}`} className={cn(LINK, "text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "branch", id: name }) }}>{name}</button>
+}
+export function FileLink({ path, children, className }: { path: string; children?: ReactNode; className?: string }) {
+  const p = useProto()
+  if (!PROJECT_TREE.some((f) => f.path === path) && !p.files.some((f) => f.path === path)) return <span className={className}>{children ?? fileName(path)}</span>
+  return <button type="button" title={`Show ${fileName(path)} in Explorer`} className={cn(LINK, "min-w-0 truncate text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "file", id: path }) }}>{children ?? fileName(path)}</button>
 }
 
 export function FileMenu({ file, children }: { file: FileEntry; children: ReactNode }) {
@@ -49,12 +77,12 @@ export function FileMenu({ file, children }: { file: FileEntry; children: ReactN
         {file.lock && !mine ? (
           <>
             <ContextMenuItem onClick={() => p.openFlow({ kind: "locks" })}><Lock className="text-red-600" /> {lockLabel(file.lock)} on {lockBranch(file.lock)}</ContextMenuItem>
-            <ContextMenuItem variant="destructive" onClick={() => p.openFlow({ kind: "release-lock", path: file.path })}><LockOpen /> {p.mode === "developer" ? `Release ${file.lock.by}'s lock…` : <Advanced>Release {file.lock.by}'s lock…</Advanced>}</ContextMenuItem>
+            <ContextMenuItem variant="destructive" onClick={() => p.openFlow({ kind: "release-lock", path: file.path })}><LockOpen /> Release {file.lock.by}'s lock…</ContextMenuItem>
           </>
         ) : (
           <ContextMenuItem onClick={() => p.toggleLock(file.path)}>{mine ? <><LockOpen /> Release lock</> : <><Lock /> Lock{p.mode === "developer" && ` on ${p.branch}`}</>}</ContextMenuItem>
         )}
-        <ContextMenuItem onClick={() => p.say("History for " + fileName(file.path))}>Show history</ContextMenuItem>
+        <ContextMenuItem onClick={() => p.goTo({ kind: "file", id: file.path })}>Show in Explorer</ContextMenuItem>
         <ContextMenuItem onClick={() => p.openFlow({ kind: "diff", paths: [file.path] })}><FileDiff /> Show diff</ContextMenuItem>
         <ContextMenuItem disabled={!file.change} onClick={() => p.reset(file.path)}>Reset (discard my changes)</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Opened file location")}>Open file location</ContextMenuItem>
@@ -83,8 +111,8 @@ export function RevisionMenu({ rev, children }: { rev: Revision; children: React
         <ContextMenuItem onClick={() => p.say("Restore: choose a file or all files")}>Restore this revision…</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Copied " + rev.id)}>Copy revision ID</ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => p.say("Revert (Advanced)")}><Advanced>Revert</Advanced></ContextMenuItem>
-        <ContextMenuItem onClick={() => p.say("Cherry-pick (Advanced)")}><Advanced>Cherry-pick</Advanced></ContextMenuItem>
+        <ContextMenuItem onClick={() => p.say("Revert")}>Revert</ContextMenuItem>
+        <ContextMenuItem onClick={() => p.say("Cherry-pick")}>Cherry-pick</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -109,15 +137,15 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreat
         {onCreateFrom && <ContextMenuItem onClick={onCreateFrom}><GitBranchPlus /> New branch from here…</ContextMenuItem>}
         <ContextMenuItem onClick={() => p.say("Copied " + name)}>Copy name</ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: false })}><GitMerge /> <Advanced>Merge into {p.branch}…</Advanced></ContextMenuItem>
-        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: true })}><GitMerge /> <Advanced>Merge {p.branch} into this…</Advanced></ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: false })}><GitMerge /> Merge into {p.branch}…</ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: true })}><GitMerge /> Merge {p.branch} into this…</ContextMenuItem>
         {(() => {
           const prot = p.protectedBranches.includes(name)
           const why = archiveBlocker(p, name)
           return (
             <>
-              <ContextMenuItem onClick={() => p.setProtected(name, !prot)}>{prot ? <ShieldOff /> : <Shield />} <Advanced>{prot ? "Unprotect" : "Protect from direct pushes"}</Advanced></ContextMenuItem>
-              <ContextMenuItem variant="destructive" disabled={!!why} title={why ?? undefined} onClick={() => p.openFlow({ kind: "archive-branch", branch: name })}><Archive /> <Advanced>{why ? `Archive (${why})` : "Archive…"}</Advanced></ContextMenuItem>
+              <ContextMenuItem onClick={() => p.setProtected(name, !prot)}>{prot ? <ShieldOff /> : <Shield />} {prot ? "Unprotect" : "Protect from direct pushes"}</ContextMenuItem>
+              <ContextMenuItem variant="destructive" disabled={!!why} title={why ?? undefined} onClick={() => p.openFlow({ kind: "archive-branch", branch: name })}><Archive /> {why ? `Archive (${why})` : "Archive…"}</ContextMenuItem>
             </>
           )
         })()}
