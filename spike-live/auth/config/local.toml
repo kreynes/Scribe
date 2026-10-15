@@ -1,0 +1,12 @@
+# loreserver --config spike-live/auth/config : JWT auth against mint.py's keys.
+# The OIDC block is required by the server; the CLI is driven with --access-token instead.
+[server.auth]
+jwt_issuer = "http://127.0.0.1:8765"
+jwt_audience = ["lore-service"]
+permission_claim = "roles"
+
+[server.auth.jwk]
+endpoint = "http://127.0.0.1:8765/jwks.json"
+
+[server.auth.oidc]
+client_id = "scribe-test"

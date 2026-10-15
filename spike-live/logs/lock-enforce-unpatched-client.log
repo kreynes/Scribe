@@ -1,0 +1,90 @@
+
+=== alice: lock acquire a.txt ===
+Lock acquired on files:
+a.txt
+rc=0
+
+=== bob: lock status a.txt b.txt ===
+Files locked for edit:
+a.txt by alice on Thu, 15 Oct 2026 07:06:22 +0000
+rc=0
+
+=== bob: lock query ===
+Locks found:
+a.txt by alice on branch e726318bbc3fd75ac8733a7e030cc35b
+rc=0
+
+=== bob: lock acquire a.txt (held by alice) ===
+[Error] Failed to lock-acquire 1 batch(es) out of 1
+[Error] Failed to acquire the lock: code: 'Internal error', message: "resource already locked"
+  at lore-transport\src\error.rs:40:18
+  at lore-revision\src\lock\file\acquire.rs:233 - Failed to acquire the lock
+rc=255
+
+=== bob: lock release a.txt (held by alice) ===
+[Error] Failed to lock-release 1 batch(es) out of 1
+[Error] Failed to release the lock: code: 'The system is not in a state required for the operation's execution', message: "resource locked by somebody else"
+  at lore-transport\src\error.rs:31 - remote rejected the request
+  at lore-revision\src\lock\file\release.rs:280 - Failed to release the lock
+rc=255
+
+=== alice: lock status a.txt (after bob's release attempt) ===
+Files locked for edit:
+a.txt by alice on Thu, 15 Oct 2026 07:06:22 +0000
+rc=0
+
+=== bob: stage a.txt (locked by alice) ===
+Staging file system changes
+Staging 1 files (1 modified, 0 added, 0 deleted, 0 moved)
+Staged repository state 1bfb61289d6c3287941a92b8570f6ea07f05105fe9ee322e4494a424a49d6f06
+rc=0
+
+=== bob: revision commit (a.txt locked by alice) ===
+Fragmenting files and updating tree hashes
+Committing staged changes
+Committed 1/1 directories, 1/1 files, 13 bytes/13 bytes (1 modified, 0 deleted)
+Stored history for 2 nodes
+Repository: 01a13e613b3d74f3a8dc87212ca9bdd3
+Revision  : 2
+Signature : 102edb83e061226435fce63d957a79c64bb97c59f198a9a86fd027cc3571662a
+Parent    : 8f0abee72e3e55859b368d66db68030236111d8c786fa167c4f2fe5fcd2828f3
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Date      : Thu, 15 Oct 2026 07:06:22 +0000
+    bob edits a locked file
+Creator   : bob
+Committer : bob
+Commit succeeded
+
+rc=0
+
+=== bob: branch push (a.txt locked by alice) ===
+[Error] Not authorized to access repository
+  at lore-transport\src\quic\storage_service\client.rs:248:51
+  at lore-revision\src\branch\push.rs:734 - opening storage session
+rc=17
+
+=== alice: lock status a.txt (after bob's push) ===
+Files locked for edit:
+a.txt by alice on Thu, 15 Oct 2026 07:06:22 +0000
+rc=0
+
+=== server history ===
+Revision  : 1
+Signature : 8f0abee72e3e55859b368d66db68030236111d8c786fa167c4f2fe5fcd2828f3
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Date      : Thu, 15 Oct 2026 07:05:22 +0000
+    init
+Creator   : seed
+Committer : seed
+
+rc=0
+
+=== alice: sync (pull bob's change to her locked file) ===
+Already on branch main latest revision 1 -> 8f0abee72e3e55859b368d66db68030236111d8c786fa167c4f2fe5fcd2828f3
+
+rc=0
+
+=== alice: lock release a.txt ===
+Lock released on files:
+a.txt
+rc=0

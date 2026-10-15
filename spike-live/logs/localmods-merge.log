@@ -1,0 +1,115 @@
+rc=0
+Clone complete in 0.12s
+
+################ Q2: LocalModifications ################
+
+=== x: change a.txt and b.txt, add d.txt, push revision 2 ===
+rc=0
+
+=== y: uncommitted edits to a.txt and c.txt (a clashes with revision 2, c does not); untracked d.txt clashes with x's added d.txt ===
+Repository 01a13e655e907e23a5716791c42d56fb
+On branch main revision 1 -> e177819a97966f647105f847ac41897c2515f4f85c926913523db820f0ef3805
+Remote revision 2 -> f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a
+Local branch is behind remote
+rc=0
+
+=== y: CLI sync ===
+Sync from remote lore://127.0.0.1:41337
+On branch main revision 1 -> e177819a97966f647105f847ac41897c2515f4f85c926913523db820f0ef3805
+Synchronizing to revision 2 -> f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a
+Calculating deltas 1 -> 2
+Verifying 3 changes with local file system
+[Error] File has local changes: a.txt (incoming size 9 bytes, file system size 13 bytes)
+[Error] File has local changes: d.txt (incoming size 6 bytes, file system size 18 bytes)
+[Error] Local modifications prevent synchronization
+  at lore-revision\src\fs\realize.rs:779:47
+
+rc=44
+
+=== y: library sync (raw events) ===
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","branchName":"main","isLatest":1,"local":0,"remote":"lore://127.0.0.1:41337","remoteAuthorized":1,"remoteAvailable":1,"repository":"01a13e655e907e23a5716791c42d56fb","sourceRevision":"e177819a97966f647105f847ac41897c2515f4f85c926913523db820f0ef3805","sourceRevisionNumber":1,"targetRevision":"f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a","targetRevisionNumber":2},"tagName":"revisionSyncTarget"}
+EVENT {"data":{"error":{"errorCode":44,"message":"Local modifications prevent synchronization","traceLocations":[{"column":47,"context":"","file":"lore-revision\\src\\fs\\realize.rs","line":779}]},"status":44},"tagName":"complete"}
+EVENT {"data":{"unused":0},"tagName":"end"}
+STATUS 44 (0 per-file/progress events not printed)
+
+=== y: same, but only c.txt dirty (no clash) ===
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","branchName":"main","isLatest":1,"local":0,"remote":"lore://127.0.0.1:41337","remoteAuthorized":1,"remoteAvailable":1,"repository":"01a13e655e907e23a5716791c42d56fb","sourceRevision":"e177819a97966f647105f847ac41897c2515f4f85c926913523db820f0ef3805","sourceRevisionNumber":1,"targetRevision":"f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a","targetRevisionNumber":2},"tagName":"revisionSyncTarget"}
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","flagConflict":false,"flagMerge":false,"revision":"f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a","revisionNumber":2},"tagName":"revisionSyncRevision"}
+EVENT {"data":{"error":{"errorCode":0,"message":"","traceLocations":[]},"status":0},"tagName":"complete"}
+EVENT {"data":{"unused":0},"tagName":"end"}
+STATUS 0 (5 per-file/progress events not printed)
+Repository 01a13e655e907e23a5716791c42d56fb
+On branch main revision 2 -> f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a
+Remote revision 2 -> f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a
+Local branch in sync with remote
+c local edit
+
+=== x: branch create feature (changes b.txt), push ===
+rc=0
+
+=== y-sw: fresh clone at main tip, uncommitted edit to b.txt ===
+Clone complete in 0.12s
+
+=== y-sw: CLI branch switch feature ===
+Switching branch to feature, using current remote latest revision abcaf6eeb58b6db95f7203b3368cad2d5ac10d9934cb961e8f0c9915caad203c
+Calculating deltas 2 -> 3
+Verifying 1 changes with local file system
+[Error] File has local changes: b.txt (incoming size 13 bytes, file system size 13 bytes)
+[Error] Local modifications prevent synchronization
+  at lore-revision\src\fs\realize.rs:779:47
+  at lore-revision\src\repository.rs:2869 - Failed to synchronize state during branch switch
+rc=44
+
+=== y-sw: library branch switch feature (raw events) ===
+EVENT {"data":{"branch":{"id":"01a13e6564a47ee29640830373b846fa","latestLocal":"abcaf6eeb58b6db95f7203b3368cad2d5ac10d9934cb961e8f0c9915caad203c","latestRemote":"abcaf6eeb58b6db95f7203b3368cad2d5ac10d9934cb961e8f0c9915caad203c","location":"remote","name":"feature","revision":"abcaf6eeb58b6db95f7203b3368cad2d5ac10d9934cb961e8f0c9915caad203c"}},"tagName":"branchSwitchBegin"}
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","branchName":"main","isLatest":0,"local":1,"remote":"lore://127.0.0.1:41337","remoteAuthorized":1,"remoteAvailable":1,"repository":"01a13e655e907e23a5716791c42d56fb","sourceRevision":"f85cfd06d28875c48d757ac78eb087ffce78cff548a1c762d0a7c93f32ef663a","sourceRevisionNumber":2,"targetRevision":"abcaf6eeb58b6db95f7203b3368cad2d5ac10d9934cb961e8f0c9915caad203c","targetRevisionNumber":3},"tagName":"revisionSyncTarget"}
+EVENT {"data":{"error":{"errorCode":44,"message":"Local modifications prevent synchronization","traceLocations":[{"column":47,"context":"","file":"lore-revision\\src\\fs\\realize.rs","line":779},{"column":14,"context":"Failed to synchronize state during branch switch","file":"lore-revision\\src\\repository.rs","line":2869}]},"status":44},"tagName":"complete"}
+EVENT {"data":{"unused":0},"tagName":"end"}
+STATUS 44 (0 per-file/progress events not printed)
+
+################ Q4: sync over diverged history ################
+Clone complete in 0.13s
+Clone complete in 0.12s
+
+=== p: commit 'a from p' and push (this is THEIRS from q's point of view) ===
+rc=0
+
+=== q: commit 'a from q' locally, do not push (this is q's own work) ===
+
+=== q: CLI sync ===
+Sync from remote lore://127.0.0.1:41337
+On branch main revision 3 -> 8c28adee6b449e6c9b0ef84b6f0db5150d28d7da94db7037e7535496c63325fc
+Synchronizing to revision 3 -> 2d88becf33bb1e7d9817d5988ee0caae4c810079987009162319514838ac1059
+Remote and local branch have diverged, performing merge
+Starting merge of branch e726318bbc3fd75ac8733a7e030cc35b revision 2d88becf33bb1e7d9817d5988ee0caae4c810079987009162319514838ac1059
+
+rc=0
+
+=== q: status after sync ===
+Repository 01a13e655e907e23a5716791c42d56fb
+On branch main revision 3 -> 8c28adee6b449e6c9b0ef84b6f0db5150d28d7da94db7037e7535496c63325fc
+Remote revision 3 -> 2d88becf33bb1e7d9817d5988ee0caae4c810079987009162319514838ac1059
+Local branch has diverged, synchronize to merge
+Pending merge, incoming revision 8c28adee6b449e6c9b0ef84b6f0db5150d28d7da94db7037e7535496c63325fc
+Changes in conflict:
+M  a.txt (M)!
+rc=0
+
+=== q: a.txt after sync ===
+<<<<<<< ours
+a from q (local commit)
+||||||| original
+a from x
+=======
+a from p (pushed)
+>>>>>>> theirs
+
+=== q: branch merge resolve mine a.txt ===
+rc=0
+
+=== q: a.txt after resolve mine ===
+a from p (pushed)
+
+=== q-theirs: branch merge resolve theirs a.txt ===
+rc=0
+a from q (local commit)

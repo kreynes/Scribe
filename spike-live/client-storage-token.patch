@@ -1,0 +1,14 @@
+diff --git a/lore-transport/src/quic/storage_service/client.rs b/lore-transport/src/quic/storage_service/client.rs
+index 41f5b69..c1a60a3 100644
+--- a/lore-transport/src/quic/storage_service/client.rs
++++ b/lore-transport/src/quic/storage_service/client.rs
+@@ -300,7 +300,8 @@ impl Storage for StorageClient {
+             .await;
+             authorization_token
+         } else {
+-            String::new()
++            // scribe#24 spike patch: with OIDC auth (no auth_url) send the supplied access token.
++            self.credentials.tokens().1
+         };
+         let token_bytes = token.as_bytes();
+ 

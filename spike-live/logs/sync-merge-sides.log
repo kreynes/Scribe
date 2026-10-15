@@ -1,0 +1,56 @@
+== library sync on local-side (raw events) ==
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","branchName":"main","isLatest":1,"local":0,"remote":"lore://127.0.0.1:41337","remoteAuthorized":1,"remoteAvailable":1,"repository":"01a13e66ed1770f1a9f3066e23306f15","sourceRevision":"e6b42dc661d860466ac467710fe4571dc00b6999ca594c0e0b2ebf9d8f72ab99","sourceRevisionNumber":2,"targetRevision":"647affd655feec87e46b20595be9c674c591ddce93e0f23290ff7f5321f30502","targetRevisionNumber":2},"tagName":"revisionSyncTarget"}
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","revision":"647affd655feec87e46b20595be9c674c591ddce93e0f23290ff7f5321f30502","revisionNumber":2},"tagName":"branchMergeStartBegin"}
+EVENT {"data":{"hasConflicts":1,"signature":"c4c9df0024ada8941e2537ada634cf007f1a0418a8543dc5495264618b5e1df4","stats":{"bytesUpdate":9,"bytesUpdateTotal":9,"discoveryComplete":true,"fileAutomerge":0,"fileConflict":1,"fileDelete":0,"fileDeleteTotal":0,"fileUpdate":1,"fileUpdateTotal":1}},"tagName":"branchMergeStartEnd"}
+EVENT {"data":{"branch":"e726318bbc3fd75ac8733a7e030cc35b","flagConflict":true,"flagMerge":true,"revision":"c4c9df0024ada8941e2537ada634cf007f1a0418a8543dc5495264618b5e1df4","revisionNumber":0},"tagName":"revisionSyncRevision"}
+EVENT {"data":{"error":{"errorCode":0,"message":"","traceLocations":[]},"status":0},"tagName":"complete"}
+EVENT {"data":{"unused":0},"tagName":"end"}
+STATUS 0 (113 per-file/progress events not printed)
+Repository 01a13e66ed1770f1a9f3066e23306f15
+On branch main revision 2 -> e6b42dc661d860466ac467710fe4571dc00b6999ca594c0e0b2ebf9d8f72ab99
+Remote revision 2 -> 647affd655feec87e46b20595be9c674c591ddce93e0f23290ff7f5321f30502
+Local branch has diverged, synchronize to merge
+Pending merge, incoming revision e6b42dc661d860466ac467710fe4571dc00b6999ca594c0e0b2ebf9d8f72ab99
+Changes staged for commit:
+M g.txt (M)
+Changes in conflict:
+M  f.txt (M)!
+-- f.txt:
+<<<<<<< ours
+LOCAL
+||||||| original
+BASE
+=======
+REMOTE
+>>>>>>> theirs
+-- g.txt (non-conflicting remote change):
+g remote
+after resolve mine:   REMOTE
+after resolve theirs: LOCAL
+== commit the merge (resolved mine) and push ==
+Committing staged changes
+Committed 1/1 directories, 2/2 files, 16 bytes/16 bytes (2 modified, 0 deleted)
+Revision  : 3
+Parent    : 647affd655feec87e46b20595be9c674c591ddce93e0f23290ff7f5321f30502
+Parent    : e6b42dc661d860466ac467710fe4571dc00b6999ca594c0e0b2ebf9d8f72ab99
+Committer : ls
+Commit succeeded
+Pushed revision 3 -> f36096c3da16ccb7d88888659893c86694c2d1ad0cb2bf93aa34e2c1746bea98 to branch main
+-- server history
+Revision  : 3
+Signature : f36096c3da16ccb7d88888659893c86694c2d1ad0cb2bf93aa34e2c1746bea98
+Merge     : e6b42dc661d860466ac467710fe4571dc00b6999ca594c0e0b2ebf9d8f72ab99
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Merger    : ls
+Date      : Thu, 15 Oct 2026 07:11:36 +0000
+    merge
+Revision  : 2
+Signature : 647affd655feec87e46b20595be9c674c591ddce93e0f23290ff7f5321f30502
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Date      : Thu, 15 Oct 2026 07:11:35 +0000
+    remote
+Revision  : 1
+Signature : a081dc85f723a08d885b1d502bd95d444f90f8f43c502479a94aae274865a4e2
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Date      : Thu, 15 Oct 2026 07:11:35 +0000
+    base
