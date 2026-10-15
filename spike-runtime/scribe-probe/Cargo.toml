@@ -1,0 +1,11 @@
+[package]
+name = "scribe-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+lore = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
