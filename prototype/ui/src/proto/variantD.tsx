@@ -1,5 +1,5 @@
 // PROTOTYPE: Variant D, the user's layout. Side panel (logo, project switcher, branches, account) and a tabbed centre: Staging, History, Explorer, Graph.
-import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpDown, ArrowUpFromLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsLeft, ChevronsRight, ChevronsUpDown, CommandIcon, Copy, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, HistoryIcon, Info, Lock, LogOut, Monitor, Moon, Palette, Plus, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, UserRound, UserRoundPlus, X } from "lucide-react"
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpDown, ArrowUpFromLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsLeft, ChevronsRight, ChevronsUpDown, CommandIcon, Copy, Eye, Feather, FileDiff, Folder, FolderGit2, FolderOpen, FolderTree, GitBranch, GitBranchPlus, GitCommitHorizontal, GitGraph, GitMerge, HistoryIcon, Info, Lock, LockOpen, LogOut, Monitor, Moon, Palette, Plus, RefreshCw, ScrollText, Search, Settings, Settings2, SlidersHorizontal, Star, Sun, TriangleAlert, UserRound, UserRoundPlus, Users, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { BranchMenu, ChangeBadge, FileMenu, LoreLog, OperationBar, RevisionMenu } from "./shared"
-import { BRANCHES, PROJECT_TREE, fileName, useProto, type FileEntry, type Mode, type Revision } from "./state"
+import { BRANCHES, PROJECT_TREE, changedFilesFor, fileName, lockBranch, revisionDiff, useProto, type FileEntry, type Mode } from "./state"
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
@@ -48,7 +48,7 @@ const DAY = 24 * HOUR
 function LockIcon({ file }: { file: FileEntry }) {
   if (!file.lock) return null
   const mine = file.lock.by === "you"
-  const label = mine ? "Locked by you" : `Locked by ${file.lock.by}`
+  const label = `${mine ? "Locked by you" : `Locked by ${file.lock.by}`} on ${lockBranch(file.lock)}`
   return (
     <TooltipProvider>
       <Tooltip>
@@ -98,12 +98,7 @@ function SidePanel() {
     p.say(n.has(b) ? `${b} added to favorites` : `${b} removed from favorites`)
     return n
   })
-  const switchTo = (b: string) => {
-    if (b === p.branch) return
-    if (p.files.some((f) => f.change) || p.unpushed > 0) return p.say("Commit or Commit & Push your changes before switching")
-    p.setBranch(b)
-    p.say("Switched to " + b)
-  }
+  const switchTo = (b: string) => p.requestSwitch(b)
   const switchAccount = (a: Account) => { setAccount(a); p.say(`Switched to ${a.email}`) }
   const q = searchOpen ? search.trim().toLowerCase() : ""
   const visible = branches.filter((b) => (!q || b.toLowerCase().includes(q)) && (!favOnly || favorites.has(b)))
@@ -346,10 +341,11 @@ function BranchInfoDialog({ name, favorite, onClose, onSwitch }: { name: string 
 
 
 function FileLine({ file, checked, onCheck, selected, onSelect }: { file: FileEntry; checked: boolean; onCheck: () => void; selected: boolean; onSelect: () => void }) {
-  const dev = useProto().mode === "developer"
+  const p = useProto()
+  const dev = p.mode === "developer"
   return (
     <FileMenu file={file}>
-      <div onClick={onSelect} className={cn("flex cursor-default items-center gap-3 px-3 py-1.5", selected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")}>
+      <div onClick={onSelect} onDoubleClick={() => p.openFlow({ kind: "diff", paths: [file.path] })} title="Double-click to see what changed" className={cn("flex cursor-default items-center gap-3 px-3 py-1.5", selected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")}>
         <Checkbox checked={checked} onCheckedChange={onCheck} onClick={(e) => e.stopPropagation()} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <FileTypeIcon path={file.path} />
@@ -400,14 +396,16 @@ function FileDetails({ file, onClose }: { file: FileEntry | undefined; onClose: 
               <dt className="text-zinc-500">Size</dt><dd>{file.size}</dd>
               <dt className="text-zinc-500">Status</dt><dd>{file.change ? <ChangeBadge file={file} /> : "unchanged"}</dd>
               <dt className="text-zinc-500">Lock</dt>
-              <dd className="flex items-center gap-1.5">{file.lock ? <><LockIcon file={file} /> {file.lock.by === "you" ? "Locked by you" : `Locked by ${file.lock.by}`}</> : "Not locked"}</dd>
+              <dd className="flex items-center gap-1.5">{file.lock ? <><LockIcon file={file} /> {file.lock.by === "you" ? "Locked by you" : `Locked by ${file.lock.by}`} on {lockBranch(file.lock)}</> : "Not locked"}</dd>
               <dt className="text-zinc-500">Last revision</dt><dd>{fileMeta(file).rev ? <code>{fileMeta(file).rev}</code> : <span className="text-amber-700">working copy</span>}</dd>
               <dt className="text-zinc-500">Modified</dt><dd>{formatWhen(fileMeta(file).at, dev)}</dd>
               {dev && <><dt className="text-zinc-500">Content hash</dt><dd><code>blake3 9a1f…c03e</code></dd></>}
             </dl>
             <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.say("Diff for " + fileName(file.path))}>Show diff</Button>
-              {(!file.lock || file.lock.by === "you") && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.toggleLock(file.path)}>{file.lock ? "Release lock" : "Lock"}</Button>}
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.openFlow({ kind: "diff", paths: [file.path] })}><FileDiff className="size-3.5" /> Show diff</Button>
+              {(!file.lock || file.lock.by === "you")
+                ? <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.toggleLock(file.path)}>{file.lock ? "Release lock" : "Lock"}</Button>
+                : <Button size="sm" variant="ghost" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => p.openFlow({ kind: "release-lock", path: file.path })}>Release {file.lock.by}'s lock…</Button>}
               {file.change && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.reset(file.path)}>Reset</Button>}
             </div>
             <div>
@@ -473,6 +471,7 @@ function StagingTab() {
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+        <ScanBar />
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           {dev ? (
             <>
@@ -499,7 +498,26 @@ function StagingTab() {
   )
 }
 
-type HistoryEntry = Revision & { at: number }
+/** Lore only looks at the disk when asked (`lore status --scan`), so the list can miss edits made outside Scribe. */
+function ScanBar() {
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const [, tick] = useState(0)
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t) }, [])
+  const mins = Math.round((Date.now() - p.lastScan) / 60_000)
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+      <span>Checked the disk {mins < 1 ? "just now" : `${mins} min ago`}{p.autoScan && " · checks again when Scribe comes into focus"}</span>
+      <span className="ml-auto flex items-center gap-1">
+        {dev && <code className="mr-1 text-[11px] text-zinc-400">lore status --scan</code>}
+        {dev && <Button size="sm" variant="ghost" className="h-7 text-xs" title="Re-check only files already marked changed (lore status --check-dirty)" onClick={() => p.scan("check-dirty")}>Re-check changed files</Button>}
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" title="Scan for changes (F5)" onClick={() => p.scan("scan")}><RefreshCw className="size-3.5" /> Scan for changes</Button>
+      </span>
+    </div>
+  )
+}
+
+type HistoryEntry = { id: string; message: string; author: string; when: string; files: number; local?: boolean; at: number }
 
 const OLDER_HISTORY: HistoryEntry[] = [
   { id: "d1e4b6a0", message: "Footstep variations for gravel", author: "Sam", when: "", files: 9, at: NOW - 5 * DAY },
@@ -508,11 +526,6 @@ const OLDER_HISTORY: HistoryEntry[] = [
   { id: "b07a9d52", message: "Placeholder UI icons", author: "You", when: "", files: 24, at: NOW - 33 * DAY },
   { id: "c55d0e7a", message: "Initial import", author: "Marco", when: "", files: 2048, at: NOW - 64 * DAY },
 ]
-
-function changedFilesFor(rev: Revision) {
-  const seed = rev.id.charCodeAt(0) + rev.id.charCodeAt(1)
-  return PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
-}
 
 // A long-running branch, so History has enough commits to page through.
 const LONG_BRANCH = "art/character-pass-2"
@@ -699,15 +712,16 @@ function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undef
               {entry.local && <><dt className="text-zinc-500">Status</dt><dd className="text-amber-700">Not pushed yet</dd></>}
             </dl>
             <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.say("Restore: choose a file or all files")}>Restore this revision…</Button>
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Comparing with previous revision")}>Compare with previous</Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => p.openFlow(revisionDiff(entry))}><FileDiff className="size-3.5" /> Show changes</Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!!entry.local} onClick={() => p.openFlow({ kind: "sync", target: entry.id })}><ArrowDownToLine className="size-3.5" /> Sync to this…</Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => p.say("Restore: choose a file or all files")}>Restore…</Button>
             </div>
             <div>
               <div className="mb-1.5 font-medium uppercase text-zinc-500">Files changed ({entry.files})</div>
               <div className="rounded-md border bg-white">
                 {files.map((f) => (
                   <FileMenu key={f.path} file={f}>
-                    <div className="flex items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0">
+                    <div className="flex cursor-pointer items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0 hover:bg-zinc-50" title="Show what changed" onClick={() => p.openFlow(revisionDiff(entry, f.path))}>
                       <FileTypeIcon path={f.path} />
                       <span className={cn("min-w-0 flex-1 truncate", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</span>
                       <LockIcon file={f} />
@@ -836,13 +850,15 @@ function sortTree(node: Node, sort: Sort<ExplorerSortKey>): Node {
 type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: string) => void; forceOpen: boolean; selected: string | null; onSelect: (path: string) => void }
 
 function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: TreeProps) {
-  const dev = useProto().mode === "developer"
+  const p = useProto()
+  const dev = p.mode === "developer"
+  const openDiff = (path: string) => p.openFlow({ kind: "diff", paths: [path] })
   if (node.file) {
     const f = node.file
     const meta = fileMeta(f)
     return (
       <FileMenu file={f}>
-        <div onClick={() => onSelect(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
+        <div onClick={() => onSelect(f.path)} onDoubleClick={() => openDiff(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
           {/* Same width as a folder's chevron, so a file's icon lines up with sibling folders' icons. */}
           <span aria-hidden className="w-3.5 shrink-0" />
           <FileTypeIcon path={f.path} />
@@ -892,6 +908,7 @@ const lockTest: Record<LockMode, (f: FileEntry) => boolean> = {
 
 /** Split button: the left part toggles the filter, the arrow picks whose locks. */
 function LockFilterButton({ on, mode, counts, onToggle, onMode }: { on: boolean; mode: LockMode; counts: Record<LockMode, number>; onToggle: () => void; onMode: (m: LockMode) => void }) {
+  const p = useProto()
   const [open, setOpen] = useState(false)
   const label = LOCK_MODES.find(([k]) => k === mode)![1]
   return (
@@ -913,6 +930,9 @@ function LockFilterButton({ on, mode, counts, onToggle, onMode }: { on: boolean;
               <Check className={cn("size-4", !(on && mode === k) && "invisible")} />
             </button>
           ))}
+          <div className="-mx-1 my-1 border-t" />
+          <button onClick={() => { setOpen(false); p.openFlow({ kind: "locks" }) }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-zinc-100"><Users className="size-4 text-zinc-500" /> Who's editing what…</button>
+          <button disabled={!counts.me} onClick={() => { setOpen(false); p.releaseAllMine() }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-zinc-100 disabled:opacity-50"><LockOpen className="size-4 text-zinc-500" /> Release all my locks</button>
         </PopoverContent>
       </Popover>
     </div>
@@ -1016,9 +1036,11 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
   const trimmed = name.trim()
   const error = branchNameError(trimmed, branches)
   const changed = p.files.filter((f) => f.change).length
-  const dirty = changed > 0 || p.unpushed > 0
-  // Changes come along only when branching from where you are; otherwise switching would leave them behind.
-  const blocked = switchNow && dirty && from !== p.branch
+  // `lore branch create` has no base option: it branches from the revision you're on. Starting from another
+  // branch means switching there first (our guess at the sequence), which we don't do over uncommitted changes.
+  const away = from !== p.branch
+  const blocked = changed > 0 && away
+  const steps = [away && `lore branch switch ${from}`, `lore branch create ${trimmed || "<name>"}`, switchNow ? `lore branch switch ${trimmed || "<name>"}` : away && `lore branch switch ${p.branch}`].filter(Boolean)
   const canCreate = !!trimmed && !error && !blocked
   const submit = () => { if (canCreate) onCreate(trimmed, from, switchNow) }
 
@@ -1067,16 +1089,18 @@ function NewBranchDialog({ base, branches, onClose, onCreate }: { base: string |
                 ))}
               </SelectContent>
             </Select>
-            {dev && <p className="font-mono text-[11px] text-zinc-400">at latest revision of {from} · lore branch create {trimmed || "<name>"} --from {from}</p>}
+            <p className="text-xs text-zinc-500">{away ? `Starts at the latest revision of ${from}. Scribe switches there to create it${switchNow ? "" : ", then back to " + p.branch}.` : "Starts at the revision you're on now."}</p>
+            {dev && <code className="block rounded bg-zinc-100 px-2 py-1 font-mono text-[11px] leading-4 text-zinc-600">{steps.map((c) => <span key={String(c)} className="block">$ {c}</span>)}</code>}
           </div>
           <label className="flex items-start gap-2 text-sm">
             <Checkbox checked={switchNow} onCheckedChange={(v) => setSwitchNow(v === true)} className="mt-0.5" />
             <span>
               Switch to it now
-              {switchNow && dirty && !blocked && <span className="block text-xs text-zinc-500">Your {changed ? `${changed} changed file${changed === 1 ? "" : "s"}` : "unpushed commits"} come with you.</span>}
-              {blocked && <span className="block text-xs text-amber-700">You have changes on {p.branch}. Commit them first, start from {p.branch}, or untick this to create the branch without switching.</span>}
+              {switchNow && changed > 0 && !blocked && <span className="block text-xs text-zinc-500">Your {changed} changed file{changed === 1 ? "" : "s"} come with you.</span>}
+              {switchNow && p.unpushed > 0 && <span className="block text-xs text-zinc-500">Your {p.unpushed} unpushed commit{p.unpushed === 1 ? " is" : "s are"} included, since the branch starts from where you are.</span>}
             </span>
           </label>
+          {blocked && <p className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"><TriangleAlert className="size-4 shrink-0" /> To start from {from}, Scribe has to switch there first. Commit your {changed} changed file{changed === 1 ? "" : "s"}, or start from {p.branch}.</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={!canCreate}>Create branch</Button>
@@ -1156,10 +1180,11 @@ function SettingsDialog({ section, onSection, account, onSwitchAccount, project,
                     <Label className="font-normal"><RadioGroupItem value="branch" /> Move my work to a branch first</Label>
                   </RadioGroup>
                 </section>
+                <AutoLockPatterns className={block} />
                 <section className={block}>
-                  <div className="font-medium">Auto-lock patterns</div>
-                  <p className="text-xs text-zinc-500">Shared patterns come from this project's <code>.scribelock</code>. Add your own local ones here.</p>
-                  <Input placeholder="e.g. *.kra" className="font-mono text-xs" />
+                  <div className="font-medium">Scan for changes</div>
+                  <Label className="font-normal"><Checkbox checked={p.autoScan} onCheckedChange={(v) => p.setAutoScan(v === true)} /> Check the disk for changes whenever Scribe comes into focus</Label>
+                  <p className="text-xs text-zinc-500">Lore only notices edits when asked to look. Turn this off on very large projects and use Scan for changes (F5) instead.</p>
                 </section>
                 <section className={block}>
                   <div className="font-medium">Projects folder</div>
@@ -1342,6 +1367,79 @@ function ProjectsSettings({ project, onOpenProject }: { project: string; onOpenP
           )
         })}
       </div>
+    </div>
+  )
+}
+
+const SHARED_PATTERNS = ["*.psd", "*.blend", "*.umap", "*.uasset", "*.fbx", "Levels/**"]
+
+function globRe(glob: string) {
+  const esc = (x: string) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp("^" + glob.split("**").map((part) => part.split("*").map(esc).join("[^/]*")).join(".*") + "$", "i")
+}
+const matches = (glob: string, path: string) => globRe(glob).test(glob.includes("/") ? path : fileName(path))
+
+/** Settings → General: files that lock themselves when you start editing them. */
+function AutoLockPatterns({ className }: { className: string }) {
+  const p = useProto()
+  const [local, setLocal] = useState(["*.kra"])
+  const [draft, setDraft] = useState("")
+  const [test, setTest] = useState("Art/Characters/hero.psd")
+  const add = () => { const v = draft.trim(); if (v && !local.includes(v) && !SHARED_PATTERNS.includes(v)) setLocal([...local, v]); setDraft("") }
+  const hit = SHARED_PATTERNS.find((g) => matches(g, test)) ?? local.find((g) => matches(g, test))
+  const chip = "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px]"
+  return (
+    <section className={className}>
+      <div className="font-medium">Auto-lock patterns</div>
+      <p className="text-xs text-zinc-500">Files matching these lock automatically the moment you start editing them.</p>
+      <div className="space-y-1">
+        <div className="text-xs text-zinc-500">Shared with the team, from this project's <code>.scribelock</code> (read-only here)</div>
+        <div className="flex flex-wrap gap-1">{SHARED_PATTERNS.map((g) => <span key={g} className={cn(chip, "bg-zinc-50 text-zinc-600")}><Lock className="size-3" />{g}</span>)}</div>
+      </div>
+      <div className="space-y-1">
+        <div className="text-xs text-zinc-500">Just for you, on this computer</div>
+        <div className="flex flex-wrap gap-1">
+          {local.map((g) => <span key={g} className={chip}>{g}<button aria-label={`Remove ${g}`} className="text-zinc-400 hover:text-zinc-900" onClick={() => setLocal(local.filter((x) => x !== g))}><X className="size-3" /></button></span>)}
+          {!local.length && <span className="text-xs text-zinc-400">None yet.</span>}
+        </div>
+        <form className="flex gap-2 pt-1" onSubmit={(e) => { e.preventDefault(); add() }}>
+          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. *.kra or Cinematics/**" className="h-8 font-mono text-xs" />
+          <Button type="submit" size="sm" variant="outline" disabled={!draft.trim()}>Add</Button>
+        </form>
+      </div>
+      <div className="space-y-1">
+        <div className="text-xs text-zinc-500">Try a path</div>
+        <Input value={test} onChange={(e) => setTest(e.target.value)} className="h-8 font-mono text-xs" />
+        <p className={cn("text-xs", hit ? "text-emerald-700" : "text-zinc-500")}>{!test.trim() ? " " : hit ? `Locks automatically (matches ${hit}, ${SHARED_PATTERNS.includes(hit) ? "shared" : "yours"})` : "Doesn't lock automatically"}</p>
+      </div>
+      {p.mode === "developer" && <p className="text-[11px] text-zinc-400">Scribe runs <code>lore lock acquire &lt;path&gt; --branch {p.branch}</code> when a matching file first turns dirty.</p>}
+    </section>
+  )
+}
+
+/** Sync split button: the left part syncs the latest, the arrow opens the options. */
+function SyncButton() {
+  const p = useProto()
+  const [open, setOpen] = useState(false)
+  const item = "flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-zinc-100 [&>svg]:mt-0.5 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-zinc-500"
+  const go = (f: Parameters<typeof p.openFlow>[0]) => { setOpen(false); p.openFlow(f) }
+  return (
+    <div className="flex h-8 items-stretch overflow-hidden rounded-md border bg-white text-sm shadow-xs">
+      <button onClick={() => p.sync()} title={p.incoming ? "1 new revision on the server" : "Get the latest from the server"} className="flex items-center gap-1.5 px-2.5 font-medium hover:bg-zinc-100">
+        <ArrowDownToLine className="size-4" /> Sync
+        {p.incoming && <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-700">1 new</span>}
+      </button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild><button aria-label="Sync options" className="border-l px-1.5 hover:bg-zinc-100"><ChevronDown className="size-4" /></button></PopoverTrigger>
+        <PopoverContent align="end" className="w-72 p-1">
+          <button className={item} onClick={() => go({ kind: "sync", preview: true })}><Eye /> Preview what Sync would change</button>
+          <button className={item} onClick={() => go({ kind: "sync", target: "" })}><HistoryIcon /> Sync to an earlier revision…</button>
+          <button className={item} onClick={() => go({ kind: "sync", reset: true })}><TriangleAlert /> Sync and overwrite my changes…</button>
+          <button className={item} onClick={() => go({ kind: "sync" })}><FolderTree /> Choose folders on this computer…</button>
+          <div className="-mx-1 my-1 border-t" />
+          <button className={item} onClick={() => go({ kind: "sync" })}><Settings2 /> All sync options…</button>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -1673,12 +1771,17 @@ function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenCh
       <CommandList className="max-h-[26rem]">
         <CommandEmpty>No matching commands.</CommandEmpty>
         <CommandGroup heading="Actions">
-          <CommandItem onSelect={() => run(p.sync)}><ArrowDownToLine /> Sync<CommandShortcut>{MOD} Shift S</CommandShortcut></CommandItem>
+          <CommandItem onSelect={() => run(() => p.sync())}><ArrowDownToLine /> Sync<CommandShortcut>{MOD} Shift S</CommandShortcut></CommandItem>
+          <CommandItem onSelect={() => run(() => p.openFlow({ kind: "sync" }))}><ArrowDownToLine /> Sync options…</CommandItem>
+          <CommandItem onSelect={() => run(() => p.openFlow({ kind: "sync", preview: true }))}><Eye /> Preview Sync</CommandItem>
+          <CommandItem onSelect={() => run(() => p.scan("scan"))}><RefreshCw /> Scan for changes<CommandShortcut>F5</CommandShortcut></CommandItem>
           <CommandItem onSelect={() => run(() => onTab("staging"))}><GitCommitHorizontal /> Commit…</CommandItem>
           {dev
             ? <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Push</CommandItem>
             : <CommandItem onSelect={() => run(() => p.commitAndPush(""))}><ArrowUpFromLine /> Commit &amp; Push</CommandItem>}
           <CommandItem onSelect={() => run(() => runCommand("new-branch"))}><GitBranchPlus /> New branch…</CommandItem>
+          <CommandItem onSelect={() => run(() => p.openFlow({ kind: "locks" }))}><Users /> Who's editing what…</CommandItem>
+          <CommandItem onSelect={() => run(p.releaseAllMine)}><LockOpen /> Release all my locks</CommandItem>
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Go to">
@@ -1692,6 +1795,12 @@ function CommandPalette({ open, onOpenChange, onTab }: { open: boolean; onOpenCh
             <CommandItem key={b} value={`switch branch ${b}`} disabled={b === p.branch} onSelect={() => run(() => runCommand("switch-branch", b))}>
               <GitBranch /> {b}{b === p.branch && <span className="ml-auto text-xs text-zinc-400">current</span>}
             </CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading={`Merge into ${p.branch}`}>
+          {BRANCHES.filter((b) => b !== p.branch).map((b) => (
+            <CommandItem key={b} value={`merge ${b} into current`} onSelect={() => run(() => p.openFlow({ kind: "merge", branch: b, into: false }))}><GitMerge /> Merge {b}…</CommandItem>
           ))}
         </CommandGroup>
         <CommandSeparator />
@@ -1721,6 +1830,7 @@ export function VariantD() {
   const [palette, setPalette] = useState(false)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F5") { e.preventDefault(); p.scan("scan"); return }
       if (!(e.ctrlKey || e.metaKey)) return
       const k = e.key.toLowerCase()
       if (k === "k") { e.preventDefault(); setPalette((o) => !o) }
@@ -1732,8 +1842,12 @@ export function VariantD() {
         e.preventDefault(); setTab(t)
       }
     }
+    const onFocus = () => { if (p.autoScan) p.scan("auto") }
+    const onCmd = (e: Event) => { const d = (e as CustomEvent<{ type: string; value?: string }>).detail; if (d.type === "tab") setTab(d.value as TabKey) }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener("focus", onFocus)
+    window.addEventListener("scribe:command", onCmd)
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("focus", onFocus); window.removeEventListener("scribe:command", onCmd) }
   })
   return (
     <div className="flex h-full">
@@ -1754,7 +1868,7 @@ export function VariantD() {
                 <CommandIcon className="size-4" /> <span className="hidden xl:inline">Commands</span>
                 <kbd className="rounded border bg-zinc-50 px-1 font-sans text-[10px] font-medium text-zinc-500">{MOD} K</kbd>
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={p.sync}><ArrowDownToLine className="size-4" /> Sync</Button>
+              <SyncButton />
               {dev && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => p.commitAndPush("")}><ArrowUpFromLine className="size-4" /> Push{p.unpushed ? ` ↑${p.unpushed}` : ""}</Button>}
             </div>
           </div>

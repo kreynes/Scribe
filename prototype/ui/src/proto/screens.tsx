@@ -1,5 +1,5 @@
 // PROTOTYPE: Onboarding, the conflict screen, and the floating prototype switcher.
-import { CheckCircle2, CircleAlert, Copy, ExternalLink, FolderOpen, Lock, ServerCog, TimerOff } from "lucide-react"
+import { CheckCircle2, CircleAlert, Copy, ExternalLink, FileDiff, FolderOpen, Lock, ServerCog, TimerOff, Undo2 } from "lucide-react"
 import { Fragment, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +10,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 import { FileTypeIcon } from "./fileTypes"
 import { Thumb } from "./shared"
-import { fileName, useProto, type FileEntry, type Mode, type Screen } from "./state"
+import { INCOMING, fileName, useProto, type FileEntry, type Mode, type Resolution, type Screen } from "./state"
 
 const STEPS = ["Welcome", "Choose Mode", "Connect", "Sign in", "Get a project", "Done"]
 
@@ -161,64 +161,101 @@ const CONFLICTS: Conflict[] = [
   },
 ]
 
-type Resolution = "mine" | "theirs"
+const RESOLVED_LABEL: Record<Resolution, string> = { mine: "Mine", theirs: "Theirs", manual: "By hand" }
 
 export function ConflictScreen() {
   const p = useProto()
   const dev = p.mode === "developer"
+  const ctx = p.conflict
+  const list = ctx.paths ? CONFLICTS.filter((x) => ctx.paths!.includes(x.file.path)) : CONFLICTS
   const [current, setCurrent] = useState(0)
   const [resolved, setResolved] = useState<Record<string, Resolution>>({})
   const [copy, setCopy] = useState(true)
-  const c = CONFLICTS[current]
+  const [aborting, setAborting] = useState(false)
+  const [lastCmd, setLastCmd] = useState<string | null>(null)
+  const raw = list[Math.min(current, list.length - 1)]
+  // The other side comes from the incoming revision (sync) or the source branch (merge).
+  const c = ctx.origin === "sync" ? { ...raw, theirs: { ...raw.theirs, who: INCOMING.author, when: "just now", message: INCOMING.message, revision: INCOMING.id } }
+    : ctx.origin === "merge" ? { ...raw, theirs: { ...raw.theirs, message: `Latest on ${ctx.source}` } } : raw
   const name = fileName(c.file.path)
-  const left = CONFLICTS.filter((x) => !resolved[x.file.path]).length
-  const multiple = CONFLICTS.length > 1
+  const left = list.filter((x) => !resolved[x.file.path]).length
+  const multiple = list.length > 1
+  const merge = ctx.origin === "merge"
+  // Lore's sub-commands for each action. Sync conflicts are assumed to use the merge machinery too (a guess).
+  const cmd = (verb: string) => `lore branch merge ${verb} ${c.file.path}`
 
   const resolve = (r: Resolution) => {
     const next = { ...resolved, [c.file.path]: r }
     setResolved(next)
-    p.say(r === "mine" ? `Kept your ${name}` : copy ? `Used theirs. Your copy saved as ${name.replace(/(\.[^.]+)$/, ".mine$1")}` : `Used their ${name}`)
-    const nextIdx = CONFLICTS.findIndex((x, i) => i > current && !next[x.file.path])
-    const wrap = CONFLICTS.findIndex((x) => !next[x.file.path])
+    setLastCmd(cmd(r === "manual" ? "resolve" : `resolve ${r}`))
+    p.say(r === "mine" ? `Kept your ${name}` : r === "manual" ? `Marked ${name} as merged by hand` : copy ? `Used theirs. Your copy saved as ${name.replace(/(\.[^.]+)$/, ".mine$1")}` : `Used their ${name}`)
+    const nextIdx = list.findIndex((x, i) => i > current && !next[x.file.path])
+    const wrap = list.findIndex((x) => !next[x.file.path])
     if (nextIdx !== -1) setCurrent(nextIdx)
     else if (wrap !== -1) setCurrent(wrap)
   }
+  const reopen = (how: "unresolve" | "restart") => {
+    const next = { ...resolved }
+    delete next[c.file.path]
+    setResolved(next)
+    setLastCmd(cmd(how))
+    p.say(how === "unresolve" ? `${name} needs a decision again` : `${name} is back to both incoming versions; any hand edits were dropped`)
+  }
+
+  const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`
+  const title = merge
+    ? dev ? `Merge ${ctx.source} → ${p.branch}: ${files(list.length)} need${list.length === 1 ? "s" : ""} resolution` : `Merging ${ctx.source} into ${p.branch}: ${files(list.length)} changed on both`
+    : ctx.origin === "sync"
+      ? dev ? `Sync: ${files(list.length)} conflict${list.length === 1 ? "s" : ""} with ${INCOMING.id}` : `${files(list.length)} you changed ${list.length === 1 ? "was" : "were"} also changed on the server`
+      : dev ? `Conflict: ${list.length} files need resolution` : `${list.length} files were changed by you and someone else`
+  const sub = merge
+    ? dev ? `lore branch merge start ${ctx.source}${ctx.noCommit ? " --no-commit" : ""} reported ${list.length} conflict${list.length === 1 ? "" : "s"} · resolve each, then the merge commits` : `Pick which version to keep for each file. The merge finishes when every file is decided.`
+    : dev ? `revision.sync reported file_conflict=${list.length} · strategy: resolve file by file (Settings → Conflict resolution strategy)` : "Pick which version to keep for each file. Nothing is lost: both versions stay in history."
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b px-6 py-4">
-        <h1 className="text-lg font-semibold">
-          {dev ? `Conflict: ${CONFLICTS.length} files need resolution` : `${CONFLICTS.length} files were changed by you and someone else`}
-          {left === 0 && <span className="ml-2 text-sm font-normal text-emerald-700">All resolved</span>}
-        </h1>
-        <p className="text-sm text-zinc-500">
-          {dev ? `revision.sync reported file_conflict=${CONFLICTS.length} · strategy: resolve file by file (Settings → Conflict resolution strategy)` : "Pick which version to keep for each file. Nothing is lost: both versions stay in history."}
-        </p>
+      <header className="flex items-start gap-4 border-b px-6 py-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg font-semibold">
+            {title}
+            {left === 0 && <span className="ml-2 text-sm font-normal text-emerald-700">All resolved</span>}
+          </h1>
+          <p className="text-sm text-zinc-500">{sub}</p>
+        </div>
+        {merge ? (
+          aborting ? (
+            <span className="flex shrink-0 items-center gap-2 text-sm">
+              <span className="text-zinc-600">Undo the whole merge?</span>
+              <Button size="sm" variant="ghost" onClick={() => setAborting(false)}>Keep going</Button>
+              <Button size="sm" variant="destructive" onClick={() => p.leaveConflict(true)}>Abort merge</Button>
+            </span>
+          ) : <Button size="sm" variant="outline" className="shrink-0" onClick={() => setAborting(true)}><Undo2 className="size-4" /> {dev ? "Abort merge" : "Cancel merge"}</Button>
+        ) : <Button size="sm" variant="ghost" className="shrink-0" onClick={() => p.leaveConflict(false)}>Decide later</Button>}
       </header>
       <div className="flex min-h-0 flex-1">
         {multiple && (
           <aside className="flex w-64 shrink-0 flex-col border-r bg-zinc-50/60">
             <div className="flex items-center justify-between px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
               <span>Conflicting files</span>
-              <span className="normal-case tracking-normal">{CONFLICTS.length - left} of {CONFLICTS.length} done</span>
+              <span className="normal-case tracking-normal">{list.length - left} of {list.length} done</span>
             </div>
             <ul className="flex-1 space-y-0.5 overflow-auto p-2">
-              {CONFLICTS.map((x, i) => {
+              {list.map((x, i) => {
                 const r = resolved[x.file.path]
                 return (
                   <li key={x.file.path}>
                     <button
                       onClick={() => setCurrent(i)}
-                      className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left", i === current ? "bg-zinc-900 text-white" : "hover:bg-zinc-200/60")}
+                      className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left", x === raw ? "bg-zinc-900 text-white" : "hover:bg-zinc-200/60")}
                     >
                       <FileTypeIcon path={x.file.path} />
                       <span className="min-w-0 flex-1">
                         <span className={cn("block truncate text-sm", dev && "font-mono text-xs")}>{dev ? x.file.path : fileName(x.file.path)}</span>
-                        <span className={cn("block text-[11px]", i === current ? "text-zinc-300" : "text-zinc-500")}>{x.theirs.who} · {x.theirs.when}</span>
+                        <span className={cn("block text-[11px]", x === raw ? "text-zinc-300" : "text-zinc-500")}>{merge ? `${ctx.source}` : ctx.origin === "sync" ? `${INCOMING.author} · just now` : `${x.theirs.who} · ${x.theirs.when}`}</span>
                       </span>
                       {r
-                        ? <span className={cn("flex shrink-0 items-center gap-0.5 text-[11px]", i === current ? "text-emerald-300" : "text-emerald-700")}><CheckCircle2 className="size-3.5" />{r === "mine" ? "Mine" : "Theirs"}</span>
-                        : <CircleAlert className={cn("size-4 shrink-0", i === current ? "text-amber-300" : "text-amber-500")} />}
+                        ? <span className={cn("flex shrink-0 items-center gap-0.5 text-[11px]", x === raw ? "text-emerald-300" : "text-emerald-700")}><CheckCircle2 className="size-3.5" />{RESOLVED_LABEL[r]}</span>
+                        : <CircleAlert className={cn("size-4 shrink-0", x === raw ? "text-amber-300" : "text-amber-500")} />}
                     </button>
                   </li>
                 )
@@ -227,16 +264,26 @@ export function ConflictScreen() {
           </aside>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 px-6 pt-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2 px-6 pt-4 text-sm">
             <FileTypeIcon path={c.file.path} />
             <span className={cn("font-medium", dev && "font-mono text-xs")}>{dev ? c.file.path : name}</span>
-            {resolved[c.file.path] && <span className="text-xs text-emerald-700">Resolved: kept {resolved[c.file.path] === "mine" ? "your version" : "their version"}</span>}
+            {resolved[c.file.path] && (
+              <span className="flex items-center gap-2 text-xs text-emerald-700">
+                Resolved: {resolved[c.file.path] === "manual" ? "merged by hand" : `kept ${resolved[c.file.path] === "mine" ? "your version" : "their version"}`}
+                <button className="text-zinc-500 underline hover:text-zinc-900" onClick={() => reopen("unresolve")}>Undo my choice</button>
+                {dev && <button className="text-zinc-500 underline hover:text-zinc-900" onClick={() => reopen("restart")}>Start this file over</button>}
+              </span>
+            )}
+            <span className="ml-auto flex gap-1.5">
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => p.openFlow({ kind: "diff", paths: [c.file.path], conflict: true })}><FileDiff className="size-3.5" /> Show differences</Button>
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => p.say(`Opened ${name} in ${c.file.kind === "text" ? "your editor" : "its default app"}`)}><ExternalLink className="size-3.5" /> Open in editor</Button>
+            </span>
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-6 overflow-auto p-6 pt-3">
-            {([["Your version", c.mine, "mine"], ["Their version", c.theirs, "theirs"]] as const).map(([title, s, side]) => (
-              <div key={title} className={cn("flex min-h-0 flex-col gap-3 rounded-xl border p-3", resolved[c.file.path] === side && "border-emerald-300 ring-1 ring-emerald-200")}>
+            {([["Your version", c.mine, "mine"], [merge ? `Version on ${ctx.source}` : "Their version", c.theirs, "theirs"]] as const).map(([heading, s, side]) => (
+              <div key={side} className={cn("flex min-h-0 flex-col gap-3 rounded-xl border p-3", resolved[c.file.path] === side && "border-emerald-300 ring-1 ring-emerald-200")}>
                 <div className="flex items-baseline justify-between">
-                  <div className="text-sm font-medium">{title}</div>
+                  <div className="text-sm font-medium">{heading}</div>
                   <div className="text-xs text-zinc-500">{s.who} · {s.when}</div>
                 </div>
                 <div className="flex min-h-40 flex-1 items-center justify-center rounded-lg border bg-zinc-50"><Thumb file={c.file} size="lg" /></div>
@@ -255,11 +302,13 @@ export function ConflictScreen() {
           </div>
           <footer className="flex items-center gap-3 border-t px-6 py-4">
             <Label className="flex items-center gap-2 text-sm font-normal"><Checkbox checked={copy} onCheckedChange={() => setCopy(!copy)} /> Save a copy of mine first</Label>
+            {dev && lastCmd && <code className="min-w-0 truncate text-[11px] text-zinc-500">$ {lastCmd}</code>}
             <div className="ml-auto flex gap-2">
               {left === 0 ? (
-                <Button onClick={() => { p.setScreen("main"); p.say(`Resolved ${CONFLICTS.length} conflicts`) }}>Done</Button>
+                <Button onClick={() => p.finishConflict(resolved)}>{merge ? (ctx.noCommit ? "Finish merge" : "Finish and commit merge") : ctx.origin === "sync" ? "Finish sync" : "Done"}</Button>
               ) : (
                 <>
+                  {!resolved[c.file.path] && <Button variant="ghost" onClick={() => resolve("manual")} title="You combined both versions yourself, in your editor">I merged it by hand</Button>}
                   <Button variant="outline" onClick={() => resolve("mine")}>Keep mine</Button>
                   <Button onClick={() => resolve("theirs")}>Use theirs</Button>
                 </>
@@ -287,7 +336,7 @@ export function PrototypeSwitcher() {
       ))}
       <span className="h-5 w-px bg-white/30" />
       {SCREENS.map(([s, l]) => (
-        <button key={s} onClick={() => p.setScreen(s)} className={cn(pill, p.screen === s ? "bg-white text-fuchsia-800" : "hover:bg-white/20")}>{l}</button>
+        <button key={s} onClick={() => (s === "conflict" ? p.startConflict({ origin: "demo" }) : p.setScreen(s))} className={cn(pill, p.screen === s ? "bg-white text-fuchsia-800" : "hover:bg-white/20")}>{l}</button>
       ))}
       <span className="h-5 w-px bg-white/30" />
       <button title="Trigger 'Locked by Ana' warning" onClick={() => { p.setScreen("main"); p.setLockWarning(true) }} className="rounded-full p-1.5 hover:bg-white/20"><Lock className="size-4" /></button>

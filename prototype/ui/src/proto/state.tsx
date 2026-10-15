@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 export type Mode = "artist" | "developer"
 export type Screen = "onboarding" | "main" | "conflict"
 
-export type LockState = { by: "you" } | { by: string } | null
+/** Lore keys locks by branch (`lock acquire --branch`). No branch means the lock was taken on main. */
+export type LockState = { by: string; branch?: string } | null
 
 export type FileEntry = {
   path: string
@@ -49,7 +50,7 @@ export const PROJECT_TREE: FileEntry[] = [
   { path: "Audio/ambience_forest.wav", kind: "audio", change: null, staged: false, ticked: false, lock: null, size: "31 MB" },
   { path: "Art/Characters/hero_body.fbx", kind: "model", change: null, staged: false, ticked: false, lock: null, size: "54 MB" },
   { path: "Art/Env/rock_normal.tga", kind: "image", change: null, staged: false, ticked: false, lock: null, size: "22 MB" },
-  { path: "Content/Characters/Hero.uasset", kind: "scene", change: null, staged: false, ticked: false, lock: { by: "Ana" }, size: "18 MB" },
+  { path: "Content/Characters/Hero.uasset", kind: "scene", change: null, staged: false, ticked: false, lock: { by: "Ana", branch: "art/character-pass-2" }, size: "18 MB" },
   { path: "Cinematics/intro.mp4", kind: "image", change: null, staged: false, ticked: false, lock: null, size: "640 MB" },
   { path: "Config/DefaultGame.ini", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "3 KB" },
   { path: "Data/balance.csv", kind: "text", change: null, staged: false, ticked: false, lock: null, size: "41 KB" },
@@ -80,6 +81,41 @@ export const LORE_LOG = [
   "[info] repository.status: 5 dirty, 0 staged",
 ]
 
+/** A revision on the server that this computer hasn't synced yet. It touches two files you have changed locally. */
+export const INCOMING = { id: "5d0e8f21", message: "Forest tile colour fix, pipeline notes", author: "Marco", paths: ["Art/Env/forest_tile_03.png", "Docs/art-pipeline.md"], others: 9 }
+
+/** Files a revision changed. Deterministic mock, shared by History, the diff viewer and the Revision menu. */
+export function changedFilesFor(rev: Pick<Revision, "id" | "files">) {
+  const seed = rev.id.charCodeAt(0) + rev.id.charCodeAt(1)
+  return PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
+}
+
+/** Diff for one revision: the files it changed, compared with its parent. `path` is shown first. */
+export const revisionDiff = (rev: Pick<Revision, "id" | "message" | "files">, path?: string): Flow => {
+  const paths = changedFilesFor(rev).map((f) => f.path)
+  return { kind: "diff", paths: path ? [path, ...paths.filter((x) => x !== path)] : paths, revision: { id: rev.id, message: rev.message, files: rev.files } }
+}
+
+/** The whole project with this session's edits applied on top. */
+export const allFiles = (files: FileEntry[]) => [...PROJECT_TREE.map((t) => files.find((f) => f.path === t.path) ?? t), ...files.filter((f) => !PROJECT_TREE.some((t) => t.path === f.path))]
+
+/** Dialogs any screen can open. Rendered once by <Flows /> in flows.tsx. */
+export type Flow =
+  | { kind: "diff"; paths: string[]; revision?: Pick<Revision, "id" | "message" | "files">; conflict?: boolean }
+  | { kind: "merge"; branch: string; into: boolean }
+  | { kind: "sync"; target?: string; reset?: boolean; preview?: boolean }
+  | { kind: "switch"; branch: string; revision?: string }
+  | { kind: "sync-conflict"; paths: string[] }
+  | { kind: "release-lock"; path: string }
+  | { kind: "locks" }
+
+export type Resolution = "mine" | "theirs" | "manual"
+/** What sent the user to the conflict screen. "demo" = the prototype switcher. */
+export type ConflictCtx = { origin: "sync" | "merge" | "demo"; source?: string; paths?: string[]; noCommit?: boolean; message?: string }
+
+export type SyncOpts = { target?: string; reset?: boolean }
+export type SwitchOpts = { revision?: string; reset?: boolean; local?: boolean }
+
 type Proto = {
   mode: Mode; setMode: (m: Mode) => void
   screen: Screen; setScreen: (s: Screen) => void
@@ -91,12 +127,22 @@ type Proto = {
   sessionExpired: boolean; setSessionExpired: (b: boolean) => void
   operation: { label: string; pct: number } | null
   toast: string | null; say: (t: string) => void
-  sync: () => void
+  flow: Flow | null; openFlow: (f: Flow) => void; closeFlow: () => void
+  conflict: ConflictCtx; startConflict: (c: ConflictCtx) => void; finishConflict: (r: Record<string, Resolution>) => void; leaveConflict: (aborted: boolean) => void
+  incoming: typeof INCOMING | null
+  lastScan: number; autoScan: boolean; setAutoScan: (b: boolean) => void
+  scan: (how: "scan" | "check-dirty" | "auto") => void
+  sync: (opts?: SyncOpts) => void
+  requestSwitch: (b: string) => void
+  switchBranch: (b: string, opts?: SwitchOpts) => void
+  merge: (branch: string, into: boolean, opts: { message: string; noCommit: boolean; conflicts: string[] }) => void
   commit: (msg: string) => void
   commitAndPush: (msg: string) => void
   toggleTick: (path: string) => void
   toggleStage: (path: string) => void
   toggleLock: (path: string) => void
+  releaseLock: (path: string) => void
+  releaseAllMine: () => void
   reset: (path: string) => void
 }
 
@@ -125,6 +171,13 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
   const [sessionExpired, setSessionExpired] = useState(false)
   const [operation, setOperation] = useState<{ label: string; pct: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [flow, setFlow] = useState<Flow | null>(null)
+  const [conflict, setConflict] = useState<ConflictCtx>({ origin: "demo" })
+  const [incoming, setIncoming] = useState<typeof INCOMING | null>(INCOMING)
+  const [lastScan, setLastScan] = useState(() => Date.now() - 4 * 60_000)
+  const [autoScan, setAutoScan] = useState(true)
+  // Mock disk: the first scan finds an edit Lore wasn't told about; --check-dirty finds a stale flag.
+  const [diskEdit, setDiskEdit] = useState(true)
 
   useEffect(() => {
     if (!toast) return
@@ -141,6 +194,25 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     }, 250)
   }
 
+  /** Change one file, pulling it from the project tree if this session hasn't touched it yet. */
+  const upsert = (list: FileEntry[], path: string, fn: (f: FileEntry) => FileEntry) => {
+    if (list.some((f) => f.path === path)) return list.map((f) => (f.path === path ? fn(f) : f))
+    const t = PROJECT_TREE.find((f) => f.path === path)
+    return t ? [...list, fn(t)] : list
+  }
+
+  const applyIncoming = (resetPaths: string[], label: string) => {
+    if (!incoming) return
+    setHistory((h) => {
+      const local = h.filter((r) => r.local || r.when === "just now")
+      const rest = h.filter((r) => !(r.local || r.when === "just now"))
+      return [...local, { id: incoming.id, message: incoming.message, author: incoming.author, when: "just now (synced)", files: incoming.paths.length + incoming.others }, ...rest]
+    })
+    setFiles((fs) => fs.map((f) => (resetPaths.includes(f.path) ? { ...f, change: null, staged: false, ticked: false } : f)))
+    setIncoming(null)
+    setToast(label)
+  }
+
   const value: Proto = {
     mode, setMode: (m) => { setModeS(m); writeParam("mode", m) },
     screen, setScreen: (s) => { setScreenS(s); writeParam("screen", s) },
@@ -152,7 +224,86 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
     sessionExpired, setSessionExpired,
     operation,
     toast, say: setToast,
-    sync: () => run("Sync", () => setToast("Up to date with main")),
+    flow, openFlow: setFlow, closeFlow: () => setFlow(null),
+    conflict,
+    startConflict: (c) => { setConflict(c); setFlow(null); setScreenS("conflict"); writeParam("screen", "conflict") },
+    finishConflict: (r) => {
+      const n = Object.keys(r).length
+      setScreenS("main"); writeParam("screen", "main")
+      if (conflict.origin === "sync") {
+        const theirs = Object.entries(r).filter(([, v]) => v === "theirs").map(([k]) => k)
+        applyIncoming(theirs, `Sync finished. ${n} conflict${n === 1 ? "" : "s"} resolved`)
+      } else if (conflict.origin === "merge") {
+        if (conflict.noCommit) setToast(`Merge resolved. Nothing is committed yet: review it in Staging, then commit`)
+        else {
+          setHistory((h) => [{ id: "local", message: conflict.message || `Merge ${conflict.source} into ${branch}`, author: "You", when: "just now", files: n, local: true }, ...h.filter((r) => !r.local)])
+          setUnpushed((u) => u + 1)
+          setToast(`Merged ${conflict.source} into ${branch} (not pushed yet)`)
+        }
+      } else setToast(`Resolved ${n} conflicts`)
+      setConflict({ origin: "demo" })
+    },
+    leaveConflict: (aborted) => {
+      setScreenS("main"); writeParam("screen", "main")
+      setToast(aborted ? "Merge aborted. Your files are back to how they were before it started" : "Left for later. Sync again when you're ready to decide")
+      setConflict({ origin: "demo" })
+    },
+    incoming,
+    lastScan, autoScan, setAutoScan,
+    scan: (how) => {
+      const finish = () => {
+        setLastScan(Date.now())
+        if (how === "check-dirty") {
+          const stale = files.find((f) => f.path === "Audio/footsteps_grass.wav" && f.change)
+          if (!stale) return setToast("Every changed file really is changed")
+          setFiles(files.map((f) => (f === stale ? { ...f, change: null, ticked: false, staged: false } : f)))
+          return setToast("footsteps_grass.wav matches its last commit again, so it's no longer listed")
+        }
+        if (diskEdit) {
+          setDiskEdit(false)
+          setFiles(upsert(files, "Art/Env/rock_normal.tga", (f) => ({ ...f, change: "modified", ticked: true })))
+          return setToast("Found 1 new change: rock_normal.tga")
+        }
+        if (how !== "auto") setToast("No new changes on disk")
+      }
+      if (how === "auto") finish()
+      else run(how === "scan" ? "Scanning for changes" : "Re-checking changed files", finish)
+    },
+    sync: (opts = {}) => {
+      const target = opts.target && opts.target !== "latest" ? opts.target : null
+      if (target) return run("Sync", () => setToast(`Synced to ${target}. You're on an older revision now; Sync again to get the latest`))
+      if (!incoming) return run("Sync", () => setToast(`Up to date with ${branch}`))
+      const clash = incoming.paths.filter((p) => files.some((f) => f.path === p && f.change))
+      if (clash.length && !opts.reset) return run("Sync", () => setFlow({ kind: "sync-conflict", paths: clash }))
+      run("Sync", () => applyIncoming(clash, clash.length ? `Synced. Your changes to ${clash.length} file${clash.length === 1 ? " were" : "s were"} overwritten` : `Synced 1 new revision from ${incoming.author}`))
+    },
+    requestSwitch: (b) => {
+      if (b === branch) return
+      if (files.some((f) => f.change)) return setFlow({ kind: "switch", branch: b })
+      value.switchBranch(b)
+    },
+    switchBranch: (b, opts = {}) => {
+      setFlow(null)
+      run("Switch", () => {
+        if (opts.reset) setFiles(files.map((f) => ({ ...f, change: null, staged: false, ticked: false })))
+        const left = unpushed
+        setBranch(b)
+        setUnpushed(0)
+        const at = opts.revision && opts.revision !== "latest" ? ` at ${opts.revision}` : ""
+        setToast(`Switched to ${b}${at}` + (left ? `. Your ${left} unpushed commit${left === 1 ? " stays" : "s stay"} on ${branch}` : "") + (opts.reset ? ". Local changes discarded" : ""))
+      })
+    },
+    merge: (source, into, { message, noCommit, conflicts }) => {
+      setFlow(null)
+      if (into) return run("Merge", () => setToast(`Merged ${branch} into ${source}. You're still on ${branch}`))
+      if (conflicts.length) return run("Merge", () => value.startConflict({ origin: "merge", source, paths: conflicts, noCommit, message }))
+      run("Merge", () => {
+        if (noCommit) return setToast(`Merged ${source} into your working copy. Review it in Staging, then commit`)
+        setHistory((h) => [{ id: "local", message: message || `Merge ${source} into ${branch}`, author: "You", when: "just now", files: 6, local: true }, ...h.filter((r) => !r.local)])
+        setUnpushed((u) => u + 1)
+        setToast(`Merged ${source} into ${branch} with no conflicts (not pushed yet)`)
+      })
+    },
     commit: (msg) => {
       const picked = files.filter((f) => (mode === "developer" ? f.staged : f.ticked) && f.change)
       if (!picked.length) return setToast("Nothing selected to commit")
@@ -168,18 +319,32 @@ export function ProtoProvider({ children }: { children: ReactNode }) {
       if (!picked.length && !unpushed) return setToast("Nothing to push")
       run("Commit & Push", () => {
         setHistory((h) => [{ id: "a7d41e93", message: msg || "Update", author: "You", when: "just now", files: picked.length || 1 }, ...h.filter((r) => !r.local)])
-        setFiles(files.map((f) => (picked.includes(f) ? { ...f, change: null, ticked: false, staged: false, lock: f.lock && "by" in f.lock && f.lock.by === "you" ? null : f.lock } : f)))
+        setFiles(files.map((f) => (picked.includes(f) ? { ...f, change: null, ticked: false, staged: false, lock: f.lock?.by === "you" ? null : f.lock } : f)))
         setUnpushed(0)
         setToast("Pushed. Locks on pushed files were released")
       })
     },
     toggleTick: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, ticked: !f.ticked } : f))),
     toggleStage: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, staged: !f.staged } : f))),
-    toggleLock: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, lock: f.lock ? null : { by: "you" } } : f))),
+    toggleLock: (p) => setFiles(upsert(files, p, (f) => ({ ...f, lock: f.lock ? null : { by: "you", branch } }))),
+    releaseLock: (p) => {
+      const who = allFiles(files).find((f) => f.path === p)?.lock?.by
+      setFiles(upsert(files, p, (f) => ({ ...f, lock: null })))
+      setFlow(null)
+      setToast(`Released ${who === "you" ? "your" : `${who}'s`} lock on ${fileName(p)}`)
+    },
+    releaseAllMine: () => {
+      const mine = allFiles(files).filter((f) => f.lock?.by === "you")
+      let next = files
+      for (const f of mine) next = upsert(next, f.path, (g) => ({ ...g, lock: null }))
+      setFiles(next)
+      setToast(mine.length ? `Released ${mine.length} lock${mine.length === 1 ? "" : "s"}` : "You don't hold any locks")
+    },
     reset: (p) => setFiles(files.map((f) => (f.path === p ? { ...f, change: null, ticked: false, staged: false } : f))),
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
 export const fileName = (p: string) => p.split("/").pop()!
+export const lockBranch = (l: LockState) => l?.branch ?? "main"
 export const lockLabel = (l: LockState) => (!l ? null : l.by === "you" ? "Locked by you" : `Locked by ${l.by}`)

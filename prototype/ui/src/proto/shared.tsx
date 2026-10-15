@@ -1,6 +1,6 @@
 // PROTOTYPE: building blocks used by Variant D. Throwaway code.
 import type { ReactNode } from "react"
-import { GitBranchPlus, Info, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
+import { ArrowDownToLine, FileDiff, GitBranchPlus, GitMerge, Info, Lock, LockOpen, Star, TriangleAlert, X } from "lucide-react"
 import { typeOf } from "./fileTypes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { LORE_LOG, fileName, lockLabel, useProto, type FileEntry, type Revision } from "./state"
+import { LORE_LOG, fileName, lockBranch, lockLabel, revisionDiff, useProto, type FileEntry, type Revision } from "./state"
 
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
@@ -47,12 +47,15 @@ export function FileMenu({ file, children }: { file: FileEntry; children: ReactN
         <ContextMenuLabel className="truncate">{fileName(file.path)}</ContextMenuLabel>
         <ContextMenuSeparator />
         {file.lock && !mine ? (
-          <ContextMenuItem onClick={() => p.say(`${file.lock!.by} holds this lock`)}><Lock /> {lockLabel(file.lock)}</ContextMenuItem>
+          <>
+            <ContextMenuItem onClick={() => p.openFlow({ kind: "locks" })}><Lock className="text-red-600" /> {lockLabel(file.lock)} on {lockBranch(file.lock)}</ContextMenuItem>
+            <ContextMenuItem variant="destructive" onClick={() => p.openFlow({ kind: "release-lock", path: file.path })}><LockOpen /> {p.mode === "developer" ? `Release ${file.lock.by}'s lock…` : <Advanced>Release {file.lock.by}'s lock…</Advanced>}</ContextMenuItem>
+          </>
         ) : (
-          <ContextMenuItem onClick={() => p.toggleLock(file.path)}>{mine ? <><LockOpen /> Release lock</> : <><Lock /> Lock</>}</ContextMenuItem>
+          <ContextMenuItem onClick={() => p.toggleLock(file.path)}>{mine ? <><LockOpen /> Release lock</> : <><Lock /> Lock{p.mode === "developer" && ` on ${p.branch}`}</>}</ContextMenuItem>
         )}
         <ContextMenuItem onClick={() => p.say("History for " + fileName(file.path))}>Show history</ContextMenuItem>
-        <ContextMenuItem onClick={() => p.say("Diff for " + fileName(file.path))}>Show diff</ContextMenuItem>
+        <ContextMenuItem onClick={() => p.openFlow({ kind: "diff", paths: [file.path] })}><FileDiff /> Show diff</ContextMenuItem>
         <ContextMenuItem disabled={!file.change} onClick={() => p.reset(file.path)}>Reset (discard my changes)</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Opened file location")}>Open file location</ContextMenuItem>
         {p.mode === "developer" && (
@@ -75,8 +78,9 @@ export function RevisionMenu({ rev, children }: { rev: Revision; children: React
       <ContextMenuContent className="w-64">
         <ContextMenuLabel className="truncate">{rev.message}</ContextMenuLabel>
         <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => p.openFlow(revisionDiff(rev))}><FileDiff /> Show changes</ContextMenuItem>
+        <ContextMenuItem disabled={!!rev.local} onClick={() => p.openFlow({ kind: "sync", target: rev.id })}><ArrowDownToLine /> Sync to this revision…</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Restore: choose a file or all files")}>Restore this revision…</ContextMenuItem>
-        <ContextMenuItem onClick={() => p.say(`${rev.files} changed files`)}>Show changed files</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Copied " + rev.id)}>Copy revision ID</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => p.say("Revert (Advanced)")}><Advanced>Revert</Advanced></ContextMenuItem>
@@ -94,7 +98,8 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreat
       <ContextMenuContent className="w-60">
         <ContextMenuLabel>{name}</ContextMenuLabel>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={name === p.branch} onClick={() => switchBranch(p, name)}>Switch to this branch</ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.requestSwitch(name)}>Switch to this branch</ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "switch", branch: name })}>Switch with options…</ContextMenuItem>
         {onInfo && <ContextMenuItem onClick={onInfo}><Info /> Branch information…</ContextMenuItem>}
         {onToggleFavorite && (
           <ContextMenuItem onClick={onToggleFavorite}>
@@ -104,18 +109,12 @@ export function BranchMenu({ name, children, favorite, onToggleFavorite, onCreat
         {onCreateFrom && <ContextMenuItem onClick={onCreateFrom}><GitBranchPlus /> New branch from here…</ContextMenuItem>}
         <ContextMenuItem onClick={() => p.say("Copied " + name)}>Copy name</ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => p.say("Merge into current (Advanced)")}><Advanced>Merge into current</Advanced></ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: false })}><GitMerge /> <Advanced>Merge into {p.branch}…</Advanced></ContextMenuItem>
+        <ContextMenuItem disabled={name === p.branch} onClick={() => p.openFlow({ kind: "merge", branch: name, into: true })}><GitMerge /> <Advanced>Merge {p.branch} into this…</Advanced></ContextMenuItem>
         <ContextMenuItem variant="destructive" onClick={() => p.say("Delete (Advanced)")}><Advanced>Delete</Advanced></ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
-}
-
-function switchBranch(p: ReturnType<typeof useProto>, name: string) {
-  const dirty = p.files.some((f) => f.change) || p.unpushed > 0
-  if (dirty) return p.say("Commit or Commit & Push your changes before switching")
-  p.setBranch(name)
-  p.say("Switched to " + name)
 }
 
 export function ExpiredBanner() {

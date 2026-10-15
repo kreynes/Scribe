@@ -1,6 +1,7 @@
 // PROTOTYPE: "How do Developer Mode and Artist Mode look side by side?" (kreynes/Scribe#10)
 // Variant D of Scribe's main screen (A–C were rejected and removed), in ?mode=artist|developer,
 // plus ?screen=onboarding|main|conflict. Throwaway: in-memory mock data, no Lore calls.
+import { Flows } from "./proto/flows"
 import { ConflictScreen, Onboarding, PrototypeSwitcher } from "./proto/screens"
 import { ExpiredBanner, LockWarningDialog, Toast } from "./proto/shared"
 import { ProtoProvider, useProto } from "./proto/state"
@@ -17,6 +18,7 @@ function Shell() {
         {p.screen === "main" && <VariantD />}
       </div>
       <LockWarningDialog />
+      <Flows />
       <Toast />
       <PrototypeSwitcher />
     </div>
