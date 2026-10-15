@@ -8,6 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
@@ -51,9 +52,33 @@ export function CommitMessageFields({ value, onChange, idPrefix = "commit", comp
 
 /** Links inside information panels: open the place that shows the thing, with it selected. */
 const LINK = "cursor-pointer text-sky-700 underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+/** What a revision link's tooltip shows. The mock commit data lives in variantD, which registers a lookup here. */
+export type RevisionFacts = { message: string; author: string; when: string }
+let lookupRevision: (id: string) => RevisionFacts | undefined = () => undefined
+export const setRevisionLookup = (fn: typeof lookupRevision) => { lookupRevision = fn }
+
 export function RevLink({ id, branch, children, className }: { id: string; branch?: string; children?: ReactNode; className?: string }) {
   const p = useProto()
-  return <button type="button" title={`Open revision ${id} in History`} className={cn(LINK, "text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "revision", id, branch }) }}>{children ?? <code>{id}</code>}</button>
+  const own = p.history.find((r) => r.id === id)
+  const facts = own ? { message: own.message, author: own.author, when: own.when } : lookupRevision(id)
+  return (
+    <TooltipProvider delayDuration={250}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" aria-label={facts ? `${facts.message} (${id})` : `Revision ${id}`} className={cn(LINK, "text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "revision", id, branch }) }}>{children ?? <code>{id}</code>}</button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-72 text-left">
+          {facts ? (
+            <>
+              <div className="font-medium">{facts.message}</div>
+              <div className="opacity-70">{facts.author} · {facts.when} · <code>{id}</code></div>
+            </>
+          ) : <div>Revision <code>{id}</code></div>}
+          <div className="mt-0.5 opacity-60">Click to open in History</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
 }
 export function BranchLink({ name, className }: { name: string; className?: string }) {
   const p = useProto()

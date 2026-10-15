@@ -15,7 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { ArchivedBranchMenu, BranchLink, BranchMenu, ChangeBadge, CommitMessageFields, FileLink, FileMenu, LoreLog, OperationBar, RevLink, RevisionMenu, archiveBlocker } from "./shared"
+import { ArchivedBranchMenu, BranchLink, setRevisionLookup, BranchMenu, ChangeBadge, CommitMessageFields, FileLink, FileMenu, LoreLog, OperationBar, RevLink, RevisionMenu, archiveBlocker } from "./shared"
 import { BRANCHES, EMPTY_MSG, PROJECT_TREE, branchId, descriptionOf, fileName, lockBranch, msgReady, revisionDiff, revisionFiles, useProto, type CommitMsg, type FileEntry, type Mode } from "./state"
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
@@ -1683,6 +1683,12 @@ const GRAPH_COMMITS: GraphCommit[] = [
   c("b07a9d52", "main", "Placeholder UI icons", "You", NOW - 33 * DAY, ["c55d0e7a"], 24),
   c("c55d0e7a", "main", "Initial import", "Marco", NOW - 64 * DAY, [], 2048),
 ]
+
+// Revision links anywhere can name the commit they point at.
+setRevisionLookup((id) => {
+  const cm = GRAPH_COMMITS.find((x) => x.id === id) ?? LONG_HISTORY.find((x) => x.id === id)
+  return cm && { message: cm.message, author: cm.author, when: formatWhen(cm.at, false) }
+})
 
 type Edge = { from: number; to: number; fromLane: number; via: number; toLane: number; branch: string }
 
