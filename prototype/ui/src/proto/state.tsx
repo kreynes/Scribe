@@ -138,16 +138,23 @@ export function changedFilesFor(rev: Pick<Revision, "id" | "files">) {
 
 const CHANGE_KINDS = ["modified", "modified", "added", "modified", "deleted"] as const
 export type ChangedFile = FileEntry & { how: (typeof CHANGE_KINDS)[number] }
-const SYNTH_DIRS: [string, FileEntry["kind"], string][] = [["Art/Env/Props", "image", "png"], ["Art/Characters/Textures", "image", "tga"], ["Content/Meshes", "model", "fbx"], ["Audio/SFX", "audio", "wav"], ["Levels/Sublevels", "scene", "umap"], ["Docs/Notes", "text", "md"]]
-/** Every file a revision changed and how. Real project files come first (the same ones changedFilesFor picks); made-up ones fill the rest. */
+// Folders two levels deep, so Explorer keeps them collapsed until asked.
+const SYNTH_DIRS: [string, FileEntry["kind"], string][] = [["Art/Env/Props", "image", "png"], ["Art/Characters/Textures", "image", "tga"], ["Content/Meshes/Props", "model", "fbx"], ["Audio/SFX/Foley", "audio", "wav"], ["Levels/Sublevels/Streaming", "scene", "umap"], ["Docs/Notes/Archive", "text", "md"]]
+/** The rest of the project: bulk files that big commits (up to "Initial import") touched. Explorer lists them too. */
+const SYNTH_FILES: FileEntry[] = Array.from({ length: 2048 }, (_, i) => {
+  const [dir, kind, ext] = SYNTH_DIRS[i % SYNTH_DIRS.length]
+  return { path: `${dir}/${dir.split("/").pop()!.toLowerCase()}_${String(i).padStart(4, "0")}.${ext}`, kind, change: null, staged: false, ticked: false, lock: null, size: `${1 + ((i * 7) % 40)} MB` }
+})
+/** Every file in the project: the hand-written ones and the bulk ones. */
+export const PROJECT_FILES = [...PROJECT_TREE, ...SYNTH_FILES]
+/** Every file a revision changed and how. Real project files come first (the same ones changedFilesFor picks); bulk files fill the rest. */
 export function revisionFiles(rev: Pick<Revision, "id" | "files">): ChangedFile[] {
   const seed = rev.id.charCodeAt(0) + rev.id.charCodeAt(1)
   const real = PROJECT_TREE.filter((_, i) => (i + seed) % 3 === 0).slice(0, Math.max(1, Math.min(rev.files, 4)))
-  const out: ChangedFile[] = real.map((f, i) => ({ ...f, how: CHANGE_KINDS[(i + seed) % CHANGE_KINDS.length] }))
-  for (let i = out.length; i < rev.files; i++) {
-    const [dir, kind, ext] = SYNTH_DIRS[(i + seed) % SYNTH_DIRS.length]
-    out.push({ path: `${dir}/${dir.split("/").pop()!.toLowerCase()}_${String(i).padStart(3, "0")}.${ext}`, kind, change: null, staged: false, ticked: false, lock: null, size: `${1 + ((i * 7 + seed) % 40)} MB`, how: CHANGE_KINDS[(i + seed) % CHANGE_KINDS.length] })
-  }
+  // Hand-written files still exist, so they're never "deleted".
+  const out: ChangedFile[] = real.map((f, i) => ({ ...f, how: CHANGE_KINDS[(i + seed) % 4] }))
+  const start = (seed * 37) % SYNTH_FILES.length
+  for (let i = out.length; i < rev.files; i++) out.push({ ...SYNTH_FILES[(start + i) % SYNTH_FILES.length], how: CHANGE_KINDS[(i + seed) % CHANGE_KINDS.length] })
   return out
 }
 
@@ -158,7 +165,7 @@ export const revisionDiff = (rev: Pick<Revision, "id" | "message" | "files">, pa
 }
 
 /** The whole project with this session's edits applied on top. */
-export const allFiles = (files: FileEntry[]) => [...PROJECT_TREE.map((t) => files.find((f) => f.path === t.path) ?? t), ...files.filter((f) => !PROJECT_TREE.some((t) => t.path === f.path))]
+export const allFiles = (files: FileEntry[]) => [...PROJECT_FILES.map((t) => files.find((f) => f.path === t.path) ?? t), ...files.filter((f) => !PROJECT_FILES.some((t) => t.path === f.path))]
 
 /** Dialogs any screen can open. Rendered once by <Flows /> in flows.tsx. */
 export type Flow =

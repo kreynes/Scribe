@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { ArchivedBranchMenu, BranchLink, setRevisionLookup, BranchMenu, ChangeBadge, CommitMessageFields, FileLink, FileMenu, LoreLog, OperationBar, RevLink, RevisionMenu, archiveBlocker } from "./shared"
-import { BRANCHES, EMPTY_MSG, PROJECT_TREE, branchId, descriptionOf, fileName, lockBranch, msgReady, revisionDiff, revisionFiles, useProto, type CommitMsg, type FileEntry, type Mode } from "./state"
+import { BRANCHES, EMPTY_MSG, PROJECT_FILES, PROJECT_TREE, branchId, descriptionOf, fileName, lockBranch, msgReady, revisionDiff, revisionFiles, useProto, type CommitMsg, type FileEntry, type Mode } from "./state"
 import { FileTypeIcon, typeOf } from "./fileTypes"
 import { DateRangeFilter, RevisionFilter, type DatePreset, type DateValue } from "./filters"
 
@@ -893,7 +893,7 @@ function CommitDetails({ entry, branch, onClose }: { entry: HistoryEntry | undef
                   <FileMenu key={f.path} file={f}>
                     <div className="group flex items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0 hover:bg-zinc-50">
                       <FileTypeIcon path={f.path} />
-                      <FileLink path={f.path} className={cn("flex-1", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</FileLink>
+                      <FileLink path={f.path} onDeleted={f.how === "deleted" ? () => p.openFlow(revisionDiff(entry, f.path)) : undefined} className={cn("flex-1", dev ? "font-mono text-[11px]" : "text-xs")}>{dev ? f.path : fileName(f.path)}</FileLink>
                       <LockIcon file={f} />
                       <button className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900" title="Show what changed" aria-label={`Show what changed in ${fileName(f.path)}`} onClick={() => p.openFlow(revisionDiff(entry, f.path))}><FileDiff className="size-3.5" /></button>
                     </div>
@@ -1027,13 +1027,14 @@ type TreeProps = { node: Node; depth: number; open: Set<string>; toggle: (path: 
 function TreeNode({ node, depth, open, toggle, forceOpen, selected, onSelect }: TreeProps) {
   const p = useProto()
   const dev = p.mode === "developer"
-  const openDiff = (path: string) => p.openFlow({ kind: "diff", paths: [path] })
+  // Like a file browser: double-click opens the file. Show diff is in the right-click menu and the details panel.
+  const openFile = (path: string) => p.say(`Opened ${fileName(path)} in its default app`)
   if (node.file) {
     const f = node.file
     const meta = fileMeta(f)
     return (
       <FileMenu file={f}>
-        <div data-path={f.path} onClick={() => onSelect(f.path)} onDoubleClick={() => openDiff(f.path)} className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
+        <div data-path={f.path} onClick={() => onSelect(f.path)} onDoubleClick={() => openFile(f.path)} title="Double-click to open" className={cn("flex cursor-default items-center gap-2 py-1 pr-3", selected === f.path ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-zinc-50")} style={{ paddingLeft: depth * 16 + 12 }}>
           {/* Same width as a folder's chevron, so a file's icon lines up with sibling folders' icons. */}
           <span aria-hidden className="w-3.5 shrink-0" />
           <FileTypeIcon path={f.path} />
@@ -1117,7 +1118,7 @@ function LockFilterButton({ on, mode, counts, onToggle, onMode }: { on: boolean;
 function ExplorerTab() {
   const p = useProto()
   const [query, setQuery] = useState("")
-  const all = useMemo(() => PROJECT_TREE.map((t) => p.files.find((f) => f.path === t.path) ?? t), [p.files])
+  const all = useMemo(() => PROJECT_FILES.map((t) => p.files.find((f) => f.path === t.path) ?? t), [p.files])
   const fullTree = useMemo(() => buildTree(all), [all])
   const [open, setOpen] = useState(() => new Set(folderPaths(fullTree, 2)))
   const [dateFilter, setDateFilter] = useState<DateValue>({ kind: "preset", preset: "any" })

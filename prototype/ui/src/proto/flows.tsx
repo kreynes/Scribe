@@ -726,7 +726,7 @@ function CommitInfoDialog({ flow }: { flow: Extract<Flow, { kind: "commit-info" 
             <div key={f.path} className="group flex items-center gap-2 border-b px-3 py-1.5 text-xs last:border-b-0 hover:bg-zinc-50">
               <span className={cn("w-4 shrink-0 font-mono font-semibold", HOW_TONE[f.how])} title={f.how}>{f.how[0].toUpperCase()}</span>
               <FileTypeIcon path={f.path} />
-              <FileLink path={f.path} className={cn("flex-1", dev && "font-mono")}>{dev ? f.path : fileName(f.path)}</FileLink>
+              <FileLink path={f.path} onDeleted={f.how === "deleted" ? () => p.openFlow({ ...revisionDiff(r, f.path), back: flow }) : undefined} className={cn("flex-1", dev && "font-mono")}>{dev ? f.path : fileName(f.path)}</FileLink>
               {!dev && <span className="hidden truncate text-zinc-400 sm:block">{f.path.split("/").slice(0, -1).join(" / ")}</span>}
               <span className="w-14 shrink-0 text-right tabular-nums text-zinc-400">{f.size}</span>
               <button className="shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900" title="Show what changed" onClick={() => p.openFlow({ ...revisionDiff(r, f.path), back: flow })}><FileDiff className="size-3.5" /></button>

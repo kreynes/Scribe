@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { LORE_LOG, PROJECT_TREE, fileName, lockBranch, lockLabel, revisionDiff, useProto, type ArchivedBranch, type CommitMsg, type FileEntry, type Revision } from "./state"
+import { LORE_LOG, PROJECT_FILES, fileName, lockBranch, lockLabel, revisionDiff, useProto, type ArchivedBranch, type CommitMsg, type FileEntry, type Revision } from "./state"
 
 const KIND_TINT = { image: "from-rose-200 to-amber-100", model: "from-sky-200 to-indigo-100", audio: "from-emerald-200 to-teal-100", scene: "from-lime-200 to-green-100", text: "from-zinc-200 to-zinc-100" }
 
@@ -84,9 +84,11 @@ export function BranchLink({ name, className }: { name: string; className?: stri
   const p = useProto()
   return <button type="button" title={`Open Branch information for ${name}`} className={cn(LINK, "text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "branch", id: name }) }}>{name}</button>
 }
-export function FileLink({ path, children, className }: { path: string; children?: ReactNode; className?: string }) {
+/** A file that a revision deleted isn't in Explorer any more, so its link shows what was removed instead (`onDeleted`). */
+export function FileLink({ path, children, className, onDeleted }: { path: string; children?: ReactNode; className?: string; onDeleted?: () => void }) {
   const p = useProto()
-  if (!PROJECT_TREE.some((f) => f.path === path) && !p.files.some((f) => f.path === path)) return <span className={className}>{children ?? fileName(path)}</span>
+  if (onDeleted) return <button type="button" title={`${fileName(path)} was deleted in this revision. Show what was removed`} className={cn(LINK, "min-w-0 truncate text-left line-through decoration-zinc-400", className)} onClick={(e) => { e.stopPropagation(); onDeleted() }}>{children ?? fileName(path)}</button>
+  if (!PROJECT_FILES.some((f) => f.path === path) && !p.files.some((f) => f.path === path)) return <span className={className}>{children ?? fileName(path)}</span>
   return <button type="button" title={`Show ${fileName(path)} in Explorer`} className={cn(LINK, "min-w-0 truncate text-left", className)} onClick={(e) => { e.stopPropagation(); p.goTo({ kind: "file", id: path }) }}>{children ?? fileName(path)}</button>
 }
 
@@ -110,6 +112,7 @@ export function FileMenu({ file, children }: { file: FileEntry; children: ReactN
         <ContextMenuItem onClick={() => p.goTo({ kind: "file", id: file.path })}>Show in Explorer</ContextMenuItem>
         <ContextMenuItem onClick={() => p.openFlow({ kind: "diff", paths: [file.path] })}><FileDiff /> Show diff</ContextMenuItem>
         <ContextMenuItem disabled={!file.change} onClick={() => p.reset(file.path)}>Reset (discard my changes)</ContextMenuItem>
+        <ContextMenuItem onClick={() => p.say(`Opened ${fileName(file.path)} in its default app`)}>Open</ContextMenuItem>
         <ContextMenuItem onClick={() => p.say("Opened file location")}>Open file location</ContextMenuItem>
         {p.mode === "developer" && (
           <>
