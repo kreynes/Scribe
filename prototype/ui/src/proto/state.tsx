@@ -249,7 +249,8 @@ function readParam<T extends string>(key: string, allowed: readonly T[], fallbac
 function writeParam(key: string, value: string) {
   const p = new URLSearchParams(location.search)
   p.set(key, value)
-  history.replaceState(null, "", `?${p.toString()}`)
+  // A sandboxed host (the shared Artifact) may refuse URL changes; the mode still switches in memory.
+  try { history.replaceState(null, "", `?${p.toString()}`) } catch { /* ignore */ }
 }
 
 export function ProtoProvider({ children }: { children: ReactNode }) {
